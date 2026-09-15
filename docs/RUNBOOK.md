@@ -37,31 +37,13 @@ Provision `INGEST_HMAC_SECRETS` as a JSON object mapping each D1 `secret_slot` t
 
 ## Production release automation
 
-Production release remains fail-closed. Local green tests never imply Production readiness.
+Production release remains fail-closed. Local green tests never imply Production readiness. The repository currently exposes only read-only release planning commands:
 
 ```bash
 npm run preflight
 npm run deploy:plan
 ```
 
-When Cloudflare authentication, required Worker secrets and the D1 account are available, the controller may run:
+`deploy:plan` never mutates GitHub or Cloudflare. It prints the exact external blockers and ordered shared-mutation steps. GitHub remote creation, Cloudflare authentication, D1 creation/binding, secret provisioning, Worker deployment and provider readback require an authorized provider connector or equivalent mutation channel plus same-source readback; there is intentionally no deployment mutation command in `package.json`.
 
-```bash
-npm run deploy:cloudflare
-```
-
-The release runner performs, in order: local build, Wrangler dry-run, required-secret readback, remote D1 migrations, deterministic registry seed apply, Worker deploy, deployment-status readback, D1 source-registry count readback, and `/health` exact-commit readback. It writes `.evidence/cloudflare_readback.json` only from provider responses.
-
-After the public GitHub remote exists and CI has completed for the exact HEAD:
-
-```bash
-npm run readback:github
-```
-
-After a deployed Shadow run has accumulated the required 14-day corpus and labels:
-
-```bash
-CLOUDFLARE_WORKER_URL=https://... PIPELINE_TOKEN=... npm run readback:shadow
-```
-
-`tools/deploy_preflight.py` accepts these evidence files only when their commit SHA matches the current HEAD; stale evidence cannot promote readiness.
+After deployment exists, Shadow acceptance remains separate. Production readiness is only allowed after the 14-day labeled Shadow corpus passes the v1.3 acceptance evaluator and `npm run preflight` returns no blockers.
