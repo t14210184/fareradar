@@ -12,13 +12,14 @@ const bag='{"checked_bags_by_slice":[0],"checked_bag_kg":0,"seat_required":false
 async function add(id,amount,day,{structure=oneWay,currency='TWD',live='LIVE',baggage=bag}={}){return ingestOfferSnapshot(db,{provider_offer_id:id,query_fingerprint:`q-${id}`,provider:'p1',currency,baggage_query:baggage,observed_at:`2026-09-${String(day).padStart(2,'0')}T00:00:00Z`,expires_at:'2026-10-01T00:00:00Z',raw_sha256:String(id.charCodeAt(0)%10).repeat(64),offer_total:amount,fare_freshness:'REFRESHED_LIVE',cached_or_live:live,offer_structure:structure});}
 for(const [i,a] of [7000,6800,7200,6900,7100].entries())await add(`hist-${i}`,a,15+i);
 await add('current',4000,20);
+await add('future',999,21);
 await add('round',3500,20,{structure:roundTrip});
 await add('bagged',3600,20,{baggage:'{"checked_bags_by_slice":[1],"checked_bag_kg":20,"seat_required":false}'});
 await add('cached',3000,20,{live:'CACHED'});
 await add('usd',100,20,{currency:'USD'});
 const projected=await projectDomainEvents(db,'2026-09-21T00:00:00Z','baseline-test',20);
-const current=await baselineForOffer(db,'current','2026-09-21T00:00:00Z',180,5);
+const current=await baselineForOffer(db,'current','2026-09-22T00:00:00Z',180,5);
 const round=await baselineForOffer(db,'round','2026-09-21T00:00:00Z',180,5);
 const cached=await baselineForOffer(db,'cached','2026-09-21T00:00:00Z',180,5);
 const rows=raw.prepare('select provider_offer_id,trip_type,baggage_profile,currency from fare_baseline_observations order by provider_offer_id').all();
-console.log(JSON.stringify({projected,current,round,cached,count:rows.length,rows}));
+console.log(JSON.stringify({projected,current,round,cached,count:rows.length,rows,futureIncluded:rows.some(r=>r.provider_offer_id==='future')}));

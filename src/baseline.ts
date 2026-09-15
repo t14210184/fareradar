@@ -34,9 +34,11 @@ export async function projectFareBaselineFromOffer(db:D1Database,providerOfferId
 }
 function median(xs:number[]){const a=[...xs].sort((x,y)=>x-y);if(!a.length)return null;const m=Math.floor(a.length/2);return a.length%2?a[m]:(a[m-1]+a[m])/2;}
 export async function baselineForOffer(db:D1Database,providerOfferId:string,nowIso:string,lookbackDays=180,minSamples=5){
-  const self=await db.prepare("SELECT baseline_key FROM fare_baseline_observations WHERE provider_offer_id=?").bind(providerOfferId).first<any>();if(!self)return {ready:false,reason:"BASELINE_OBSERVATION_MISSING",sample_count:0};
-  const since=new Date(Date.parse(nowIso)-lookbackDays*86400000).toISOString();
-  const rows=(await db.prepare("SELECT provider_offer_id,amount FROM fare_baseline_observations WHERE baseline_key=? AND observed_at>=? AND observed_at<=? AND provider_offer_id<>? ORDER BY observed_at DESC LIMIT 512").bind(self.baseline_key,since,nowIso,providerOfferId).all<any>()).results;
+  const self=await db.prepare("SELECT baseline_key,observed_at FROM fare_baseline_observations WHERE provider_offer_id=?").bind(providerOfferId).first<any>();if(!self)return {ready:false,reason:"BASELINE_OBSERVATION_MISSING",sample_count:0};
+  const evaluatedAt=Date.parse(nowIso),offerObservedAt=Date.parse(self.observed_at);if(!Number.isFinite(evaluatedAt)||!Number.isFinite(offerObservedAt))return {ready:false,reason:"BASELINE_TIME_INVALID",sample_count:0};
+  const cutoff=new Date(Math.min(evaluatedAt,offerObservedAt)).toISOString();
+  const since=new Date(Date.parse(cutoff)-lookbackDays*86400000).toISOString();
+  const rows=(await db.prepare("SELECT provider_offer_id,amount FROM fare_baseline_observations WHERE baseline_key=? AND observed_at>=? AND observed_at<? AND provider_offer_id<>? ORDER BY observed_at DESC LIMIT 512").bind(self.baseline_key,since,cutoff,providerOfferId).all<any>()).results;
   const amounts=rows.map(r=>Number(r.amount)).filter(Number.isFinite);if(amounts.length<minSamples)return {ready:false,reason:"BASELINE_SAMPLE_INSUFFICIENT",sample_count:amounts.length};
   const sorted=[...amounts].sort((a,b)=>a-b);const p10=sorted[Math.floor((sorted.length-1)*0.10)];return {ready:true,reason:"READY",sample_count:amounts.length,median:median(amounts),p10,baseline_key:self.baseline_key};
 }
