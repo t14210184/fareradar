@@ -1,0 +1,8 @@
+dist/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.db
+*.sqlite
+node_modules/
+evidence/*.json
