@@ -1,6 +1,6 @@
 export interface SourceProvenance { source_id:string; canonical_url?:string|null; observed_at:string; content_sha256:string; parser_version?:string|null; access_basis:string; }
 export function provenanceValid(p:SourceProvenance){ return !!p.source_id && /^https:\/\//.test(p.canonical_url??"") && !Number.isNaN(Date.parse(p.observed_at)) && /^[a-f0-9]{64}$/.test(p.content_sha256) && !!p.access_basis; }
-export function promotionFingerprint(p:{market:string;airline?:string;routes:string[];sale_start?:string;travel_start?:string;promo_code?:string}){return [p.market,p.airline??"",[...p.routes].sort().join(","),p.sale_start??"",p.travel_start??"",p.promo_code??""].join("|").toLowerCase();}
+export function promotionFingerprint(p:{market:string;airline?:string;routes:string[];sale_start?:string;travel_start?:string;promo_code?:string;member_requirement?:string|null;channel_requirement?:string|null}){return [p.market,p.airline??"",[...p.routes].sort().join(","),p.sale_start??"",p.travel_start??"",p.promo_code??"",p.member_requirement??"",p.channel_requirement??""].join("|").toLowerCase();}
 export function promoEligible(p:{direction?:string;required_weekdays?:number[];sale_from?:string;sale_to?:string},q:{direction:string;weekday:number;at:string}){
   const t=Date.parse(q.at); if(p.direction&&p.direction!==q.direction)return false; if(p.required_weekdays&&!p.required_weekdays.includes(q.weekday))return false; if(p.sale_from&&t<Date.parse(p.sale_from))return false; if(p.sale_to&&t>Date.parse(p.sale_to))return false; return true;
 }
