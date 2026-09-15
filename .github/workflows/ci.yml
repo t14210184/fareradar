@@ -14,6 +14,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: pip install pytest
+      - run: npm ci --ignore-scripts
       - run: npm run check:ts
       - run: pytest -q
       - run: python3 scripts/validate_invariants.py
