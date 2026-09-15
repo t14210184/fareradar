@@ -10,9 +10,10 @@ export async function recordProviderRuntimeReadback(db:D1Database,input:{provide
     .bind(input.provider_id,input.worker_id,input.connector_version,input.credentials_present?1:0,JSON.stringify([...new Set(input.capabilities)].sort()),nowIso,expires).run();
   return {provider_id:input.provider_id,worker_id:input.worker_id,expires_at:expires};
 }
-export async function providerReady(db:D1Database,input:{provider_id:string;worker_id:string;verification_type:string},nowIso:string){
-  const p=await db.prepare("SELECT terms_snapshot_at,kill_switch_state,connector_state,supported_verification_json FROM provider_access_registry WHERE provider_id=?").bind(input.provider_id).first<any>();
+export async function providerReady(db:D1Database,input:{provider_id:string;worker_id:string;verification_type:string;background?:boolean},nowIso:string){
+  const p=await db.prepare("SELECT terms_snapshot_at,kill_switch_state,connector_state,supported_verification_json,background_allowed FROM provider_access_registry WHERE provider_id=?").bind(input.provider_id).first<any>();
   if(!p||p.kill_switch_state!=="CLEAR"||p.connector_state!=="IMPLEMENTED"||!currentTerms(p.terms_snapshot_at))return {ready:false,reason:"PROVIDER_ACCESS_NOT_READY"};
+  if(input.background&&!p.background_allowed)return {ready:false,reason:"PROVIDER_BACKGROUND_NOT_ALLOWED"};
   const supported=parseCaps(p.supported_verification_json); if(!supported.includes(input.verification_type))return {ready:false,reason:"CAPABILITY_NOT_ALLOWED"};
   const r=await db.prepare("SELECT credentials_present,capabilities_json,expires_at FROM provider_runtime_readbacks WHERE provider_id=? AND worker_id=?").bind(input.provider_id,input.worker_id).first<any>();
   if(!r||!r.credentials_present||Date.parse(r.expires_at)<=Date.parse(nowIso))return {ready:false,reason:"RUNTIME_READBACK_MISSING"};

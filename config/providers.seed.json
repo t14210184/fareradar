@@ -7,7 +7,7 @@
     "look_to_book_budget": 1500,
     "kill_switch_state": "CLEAR",
     "owner": "provider",
-    "connector_state": "UNIMPLEMENTED",
+    "connector_state": "IMPLEMENTED",
     "supported_verification": [
       "LIVE_REPRICE"
     ],

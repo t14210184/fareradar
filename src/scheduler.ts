@@ -45,9 +45,9 @@ export async function completeSourceFetch(db:D1Database,input:{source_id:string;
 }
 
 export async function leaseVerificationJobs(db:D1Database,nowIso:string,workerId:string,limit=5,leaseSeconds=90){
-  await db.prepare("UPDATE verification_jobs SET state='PENDING',claimed_by=NULL,lease_until=NULL WHERE state='LEASED' AND lease_until IS NOT NULL AND lease_until<=?").bind(nowIso).run();
+  await db.prepare("UPDATE verification_jobs SET state='PENDING',claimed_by=NULL,lease_until=NULL WHERE target_class='EXTERNAL_HEAVY' AND state='LEASED' AND lease_until IS NOT NULL AND lease_until<=?").bind(nowIso).run();
   const until=new Date(Date.parse(nowIso)+leaseSeconds*1000).toISOString();
-  return (await db.prepare(`UPDATE verification_jobs SET state='LEASED',claimed_by=?,lease_until=?,attempts=attempts+1 WHERE job_id IN (SELECT job_id FROM verification_jobs WHERE state='PENDING' AND available_at<=? ORDER BY created_at LIMIT ?) AND state='PENDING' RETURNING job_id,job_type,source_id,payload_json,attempts,lease_until`).bind(workerId,until,nowIso,limit).all()).results;
+  return (await db.prepare(`UPDATE verification_jobs SET state='LEASED',claimed_by=?,lease_until=?,attempts=attempts+1 WHERE job_id IN (SELECT job_id FROM verification_jobs WHERE target_class='EXTERNAL_HEAVY' AND state='PENDING' AND available_at<=? ORDER BY created_at LIMIT ?) AND state='PENDING' RETURNING job_id,job_type,source_id,payload_json,attempts,lease_until`).bind(workerId,until,nowIso,limit).all()).results;
 }
 
 

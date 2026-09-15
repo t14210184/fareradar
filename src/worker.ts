@@ -9,6 +9,7 @@ import { recordAuditEvidence, recordSourceDiscoveryEdge } from "./audit.js";
 import { leaseCandidateSignals, ackCandidateSignal } from "./priority.js";
 import { applySourceOnboardingReview, disableSource } from "./source_onboarding.js";
 import { recordProviderRuntimeReadback, providerReady } from "./provider_runtime.js";
+import { enqueueProviderSearch, leaseProviderJobs, completeProviderJob } from "./provider_jobs.js";
 
 export interface Env { DB:D1Database; INGEST_HMAC_SECRET:string; }
 const enc=new TextEncoder();
@@ -73,7 +74,7 @@ const worker={
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {job_id:string;source_id:string;success:boolean;duplicate?:boolean;schema_drift?:boolean;etag?:string;last_modified?:string;content_sha256?:string;error?:string}; const now=new Date().toISOString(); const health=await completeSourceFetch(env.DB,p,now); const state=await completeVerificationJob(env.DB,p,now); return json({ok:true,health,state});
     }
     if(req.method==="POST"&&u.pathname==="/candidate-priority/lease"){
-      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {provider_id:string;worker_id:string;verification_type:"LIVE_REPRICE"|"SELLER_RECHECK";limit?:number}; const now=new Date().toISOString(); const ready=await providerReady(env.DB,p,now); if(!ready.ready)return json({error:ready.reason},409); return json({signals:await leaseCandidateSignals(env.DB,now,p.worker_id,Math.min(p.limit??5,5),90,p.verification_type)});
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {provider_id:string;worker_id:string;verification_type:"LIVE_REPRICE"|"SELLER_RECHECK";limit?:number}; const now=new Date().toISOString(); const ready=await providerReady(env.DB,{...p,background:true},now); if(!ready.ready)return json({error:ready.reason},409); return json({signals:await leaseCandidateSignals(env.DB,now,p.worker_id,Math.min(p.limit??5,5),90,p.verification_type)});
     }
     if(req.method==="POST"&&u.pathname==="/candidate-priority/ack"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401); return json({state:await ackCandidateSignal(env.DB,JSON.parse(body),new Date().toISOString())});
@@ -89,6 +90,18 @@ const worker={
     if(req.method==="POST"&&u.pathname==="/providers/runtime/readback"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
       try{return json({ok:true,...await recordProviderRuntimeReadback(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/provider-search/enqueue"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await enqueueProviderSearch(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/provider-jobs/lease"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({jobs:await leaseProviderJobs(env.DB,JSON.parse(body),new Date().toISOString())});}catch(e){return json({error:e instanceof Error?e.message:String(e)},409);}
+    }
+    if(req.method==="POST"&&u.pathname==="/provider-jobs/complete"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({state:await completeProviderJob(env.DB,JSON.parse(body),new Date().toISOString())});}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     return json({error:"NOT_FOUND"},404);
   }
