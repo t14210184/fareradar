@@ -1,5 +1,6 @@
 import type { CandidatePlanInput, D1Database, ReadinessFacetInput } from "./types.js";
 import { persistCandidatePlan } from "./intake.js";
+import { evaluateBaggageEvidence } from "./baggage.js";
 
 function safe(v:string){return v.replace(/[^A-Za-z0-9._:-]/g,"_");}
 function plusMinutes(iso:string,n:number){return new Date(Date.parse(iso)+n*60000).toISOString();}
@@ -9,7 +10,7 @@ function strategyFor(s:any){if(s.slices.length===1)return "S01_DIRECT_OW";const 
 function facet(type:any,status:any,reason:string,nowIso:string,expires:string,evidence:string):ReadinessFacetInput{return {facet_type:type,status,reason_code:reason,observed_at:nowIso,expires_at:expires,authority:"SYSTEM_EVIDENCE",evidence_id:evidence};}
 
 export async function projectDirectVerifiedCandidate(db:D1Database,input:{queue_id:string;query_fingerprint:string;verification_state:"PROBABLE"|"CONFIRMED";best_offer_id:string},nowIso:string){
-  const offer=await db.prepare("SELECT provider_offer_id,provider,currency,offer_total,observed_at,expires_at,offer_structure_json FROM offer_snapshots WHERE provider_offer_id=?").bind(input.best_offer_id).first<any>();
+  const offer=await db.prepare("SELECT provider_offer_id,provider,currency,offer_total,observed_at,expires_at,offer_structure_json,baggage_query FROM offer_snapshots WHERE provider_offer_id=?").bind(input.best_offer_id).first<any>();
   if(!offer)return {projected:false,reason:"OFFER_NOT_FOUND"};
   const structure=parseStructure(offer.offer_structure_json);if(!directSlices(structure))return {projected:false,reason:"COMPLEX_OR_INCOMPLETE_STRUCTURE"};
   const strategy=strategyFor(structure);if(strategy==="UNSUPPORTED")return {projected:false,reason:"NON_ROUNDTRIP_TWO_SLICE"};
@@ -17,12 +18,13 @@ export async function projectDirectVerifiedCandidate(db:D1Database,input:{queue_
   const itineraryId=`direct:${safe(input.queue_id)}:${input.query_fingerprint}`;const intakeId=`direct-project:${safe(input.queue_id)}:${input.query_fingerprint}`;
   const evidence=`offer:${offer.provider_offer_id}`;const fallbackExpiry=plusMinutes(nowIso,15);const offerExpiry=offer.expires_at&&Number.isFinite(Date.parse(offer.expires_at))?offer.expires_at:null;
   const farePass=input.verification_state==="CONFIRMED"&&offerExpiry&&Date.parse(offerExpiry)>Date.parse(nowIso);const expiry=offerExpiry??fallbackExpiry;
+  const baggage=evaluateBaggageEvidence(structure,offer.baggage_query);
   const segments=structure.slices.flatMap((x:any)=>x.segments);const carriers:string[]=[...new Set<string>(segments.map((x:any)=>String(x.marketing_carrier??"")).filter(Boolean))];
   const readiness:ReadinessFacetInput[]=[
     facet("FARE_VERIFIED",farePass?"PASS":"UNKNOWN",farePass?"CONFIRMED_LIVE_OFFER":"OFFER_OR_EXPIRY_NOT_CONFIRMED",nowIso,expiry,evidence),
     facet("DOCUMENT_CLEAR","UNKNOWN","DOCUMENT_POLICY_REQUIRED",nowIso,fallbackExpiry,evidence),
     facet("CONNECTION_ACCEPTABLE","PASS","DIRECT_NO_CONNECTION",nowIso,expiry,evidence),
-    facet("BAGGAGE_FEASIBLE","UNKNOWN","BAGGAGE_PRICE_OR_ALLOWANCE_REQUIRED",nowIso,fallbackExpiry,evidence),
+    facet("BAGGAGE_FEASIBLE",baggage.status,baggage.reason,nowIso,baggage.status==="PASS"?expiry:fallbackExpiry,evidence),
     facet("COST_COMPLETE","FAIL","MANDATORY_EXTRAS_NOT_PROVEN",nowIso,fallbackExpiry,evidence),
     facet("COUPON_SEQUENCE_CLEAR","PASS","ALL_PLANNED_SLICES_FLOWN",nowIso,expiry,evidence),
     facet("POLICY_FRESH","UNKNOWN","POLICY_SNAPSHOT_REQUIRED",nowIso,fallbackExpiry,evidence)
