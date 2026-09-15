@@ -12,6 +12,7 @@ import { recordProviderRuntimeReadback, providerReady } from "./provider_runtime
 import { enqueueProviderSearch, leaseProviderJobs, completeProviderJob } from "./provider_jobs.js";
 import { upsertSearchCampaign, planSearchesForQueue, planDueCandidateSearches, dispatchProviderSearchPlans } from "./search_planner.js";
 import { ingestPolicyRecord, enrichItineraryPolicy } from "./policy_registry.js";
+import { upsertRuntimeProfile } from "./profile.js";
 
 export interface Env { DB:D1Database; INGEST_HMAC_SECRET:string; }
 const enc=new TextEncoder();
@@ -32,6 +33,10 @@ const worker={
     if(req.method==="POST"&&u.pathname==="/source-discovery/edge"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
       try{return json(await recordSourceDiscoveryEdge(env.DB,JSON.parse(body)),202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/profiles/upsert"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await upsertRuntimeProfile(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/policies/ingest"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);

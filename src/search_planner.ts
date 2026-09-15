@@ -1,5 +1,6 @@
 import type { D1Database } from "./types.js";
 import { validateExactFlightQuery, enqueueProviderSearch, type ExactFlightQuery } from "./provider_jobs.js";
+import { profileBaggageQuery } from "./profile.js";
 
 function isoDate(v:string){return /^\d{4}-\d{2}-\d{2}$/.test(v)&&Number.isFinite(Date.parse(`${v}T00:00:00Z`));}
 function iata(v:string){return /^[A-Z]{3}$/.test(v);}
@@ -32,6 +33,7 @@ export function validateSearchCampaign(c:SearchCampaignInput){
 export async function upsertSearchCampaign(db:D1Database,input:SearchCampaignInput,nowIso:string){
   const c=validateSearchCampaign(input);
   const provider=await db.prepare("SELECT provider_id FROM provider_access_registry WHERE provider_id=?").bind(c.provider_id).first();if(!provider)throw new Error("SEARCH_CAMPAIGN_PROVIDER_UNKNOWN");
+  const profile=await db.prepare("SELECT profile_id FROM runtime_profiles WHERE profile_id=?").bind(c.profile_id).first();if(!profile)throw new Error("RUNTIME_PROFILE_NOT_FOUND");
   await db.prepare(`INSERT INTO search_campaigns(campaign_id,profile_id,provider_id,origin_airports_json,destination_airports_json,departure_dates_json,trip_lengths_json,passengers_json,cabin_class,max_connections,market,locale,max_queries_per_signal,enabled,expires_at,created_at,updated_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(campaign_id) DO UPDATE SET profile_id=excluded.profile_id,provider_id=excluded.provider_id,origin_airports_json=excluded.origin_airports_json,destination_airports_json=excluded.destination_airports_json,departure_dates_json=excluded.departure_dates_json,trip_lengths_json=excluded.trip_lengths_json,passengers_json=excluded.passengers_json,cabin_class=excluded.cabin_class,max_connections=excluded.max_connections,market=excluded.market,locale=excluded.locale,max_queries_per_signal=excluded.max_queries_per_signal,enabled=excluded.enabled,expires_at=excluded.expires_at,updated_at=excluded.updated_at`)
     .bind(c.campaign_id,c.profile_id,c.provider_id,JSON.stringify(c.origin_airports),JSON.stringify(c.destination_airports),JSON.stringify(c.departure_dates),JSON.stringify(c.trip_lengths_nights),JSON.stringify(c.passengers),c.cabin_class??null,c.max_connections??null,c.market??null,c.locale??null,c.max_queries_per_signal,c.enabled?1:0,c.expires_at,nowIso,nowIso).run();
@@ -53,7 +55,8 @@ export async function planSearchesForQueue(db:D1Database,campaignId:string,queue
   outer: for(const [origin,destination] of routes.sort((a,b)=>(a[0]+a[1]).localeCompare(b[0]+b[1]))) for(const date of dates.sort()) for(const nights of lengths.sort((a,b)=>a-b)){
     const slices=[{origin,destination,departure_date:date}];
     if(nights>0){const back=addDays(date,nights);if(tw.end&&back>tw.end)continue;slices.push({origin:destination,destination:origin,departure_date:back});}
-    const query:ExactFlightQuery={slices,passengers,cabin_class:c.cabin_class??undefined,max_connections:c.max_connections??undefined,market:c.market??undefined,locale:c.locale??undefined};validateExactFlightQuery(query);queries.push(query);if(queries.length>=max)break outer;
+    const baggage_query=await profileBaggageQuery(db,c.profile_id,slices.length);
+    const query:ExactFlightQuery={slices,passengers,cabin_class:c.cabin_class??undefined,max_connections:c.max_connections??undefined,market:c.market??undefined,locale:c.locale??undefined,baggage_query};validateExactFlightQuery(query);queries.push(query);if(queries.length>=max)break outer;
   }
   let created=0;
   for(const query of queries){const fp=await sha256Hex(stable(query));const planId=`plan:${campaignId}:${queueId}:${fp}`;const r=await db.prepare("INSERT OR IGNORE INTO provider_search_plans(plan_id,campaign_id,queue_id,provider_id,query_fingerprint,query_json,state,attempts,next_attempt_at,created_at,updated_at) VALUES(?,?,?,?,?,?,'READY',0,?,?,?)")
