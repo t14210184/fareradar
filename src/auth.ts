@@ -24,7 +24,7 @@ const SCOPED_ROLE_PATHS:Record<string,Set<string>>={
   PROVIDER_WORKER:new Set(["/offers/ingest","/providers/runtime/readback","/provider-pricing/ingest","/provider-pricing/order-confirmed","/provider-search/enqueue","/payment-profiles/upsert","/checkout-reprice/enqueue","/pricing-quotes/ingest","/provider-jobs/lease","/provider-jobs/complete"]),
 };
 function rolePathAllowed(role:string,path:string){const allowed=SCOPED_ROLE_PATHS[role];return allowed?allowed.has(path):true;}
-function roleBindingValid(row:any){const role=String(row?.role??"");if(role==="AGENCY_PARTNER")return typeof row.agency_id==="string"&&row.agency_id.length>0;if(role==="EMAIL_PUSH")return typeof row.source_id==="string"&&row.source_id.length>0;if(role==="PROVIDER_WORKER")return typeof row.provider_id==="string"&&row.provider_id.length>0;return true;}
+function roleBindingValid(row:any){const role=String(row?.role??"");if(role==="AGENCY_PARTNER")return typeof row.agency_id==="string"&&row.agency_id.length>0;if(role==="EMAIL_PUSH")return typeof row.source_id==="string"&&row.source_id.length>0;if(role==="PROVIDER_WORKER")return typeof row.provider_id==="string"&&row.provider_id.length>0;if(role==="ACCESS_REVIEWER")return !row.agency_id&&!(row.source_id&&row.provider_id);return true;}
 
 export async function authorizeRequest(req:Request,body:string,env:AuthEnv):Promise<AuthPrincipal|null>{
   const ts=req.headers.get("x-fare-timestamp")??"";const n=Number(ts);const now=Date.now();if(!Number.isFinite(n)||Math.abs(now-n)>300000)return null;
@@ -54,6 +54,12 @@ export function principalAllowsPayload(p:AuthPrincipal,payload:any,path:string){
   }
   return true;
 }
+export function accessReviewerAllowsEntity(p:AuthPrincipal,kind:"source"|"provider",entityId:string){
+  if(p.legacy||p.role!=="ACCESS_REVIEWER"||!entityId||p.agency_id)return false;
+  if(kind==="source")return !p.provider_id&&(!p.source_id||p.source_id===entityId);
+  return !p.source_id&&(!p.provider_id||p.provider_id===entityId);
+}
+
 export async function cleanupExpiredNonces(db:D1Database,nowIso:string){await db.prepare("DELETE FROM used_request_nonces WHERE expires_at<=?").bind(nowIso).run();}
 
 export function workerTokenAuthorized(req:Request,workerToken:string|undefined){
