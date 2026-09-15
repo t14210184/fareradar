@@ -11,3 +11,8 @@ def test_partner_and_email_runtime_minimal_storage():
     assert x['domain_done']==3
     assert x['promotion_count']==1 and x['promotion_state']=='DISCOVERED'
     assert x['promotion_evidence']=='obs-e1'
+    assert x['priority_count']==2
+    assert x['priority_types']==[
+        {'signal_type':'AGENCY_CLEARANCE','required_verification':'SELLER_RECHECK','priority_score':75.0,'state':'PENDING'},
+        {'signal_type':'PROMOTION','required_verification':'LIVE_REPRICE','priority_score':50.0,'state':'PENDING'},
+    ]

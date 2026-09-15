@@ -6,6 +6,7 @@ import { ingestSourceObservation, projectDomainEvents } from "./ingest.js";
 import { ingestAgencyOffer, ingestEmailEvidence } from "./partner_ingest.js";
 import { ingestOfferSnapshot } from "./offers.js";
 import { recordAuditEvidence, recordSourceDiscoveryEdge } from "./audit.js";
+import { leaseCandidateSignals, ackCandidateSignal } from "./priority.js";
 
 export interface Env { DB:D1Database; INGEST_HMAC_SECRET:string; }
 const enc=new TextEncoder();
@@ -68,6 +69,12 @@ const worker={
     }
     if(req.method==="POST"&&u.pathname==="/verification-jobs/complete"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {job_id:string;source_id:string;success:boolean;duplicate?:boolean;schema_drift?:boolean;etag?:string;last_modified?:string;content_sha256?:string;error?:string}; const now=new Date().toISOString(); const health=await completeSourceFetch(env.DB,p,now); const state=await completeVerificationJob(env.DB,p,now); return json({ok:true,health,state});
+    }
+    if(req.method==="POST"&&u.pathname==="/candidate-priority/lease"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {worker_id:string;limit?:number}; return json({signals:await leaseCandidateSignals(env.DB,new Date().toISOString(),p.worker_id,Math.min(p.limit??5,5))});
+    }
+    if(req.method==="POST"&&u.pathname==="/candidate-priority/ack"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401); return json({state:await ackCandidateSignal(env.DB,JSON.parse(body),new Date().toISOString())});
     }
     return json({error:"NOT_FOUND"},404);
   }

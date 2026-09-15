@@ -1,6 +1,7 @@
 import type { D1Database } from "./types.js";
 import { promotionFingerprint, extractPromotionText } from "./source.js";
 import { claimDomainEvents, ackDomainEvent } from "./outbox.js";
+import { enqueueCandidateSignal } from "./priority.js";
 
 function validSha(x:string){return /^[a-f0-9]{64}$/i.test(x)}
 export async function ingestSourceObservation(db:D1Database,input:{observation_id:string;source_id:string;observed_at:string;canonical_url:string;content_sha256:string;parser_version?:string|null;privacy_class:"PUBLIC"|"PARTNER_STRUCTURED"|"PRIVATE_NOTIFICATION";extraction_type?:"PROMOTION_SIGNAL"|"ROUTE_UNIVERSE";structured_payload?:unknown},nowIso:string){
@@ -28,6 +29,8 @@ async function projectPromotionSignal(db:D1Database,obs:{observation_id:string;o
     db.prepare("INSERT INTO promotion_events(event_id,fingerprint,state,market,airline,routes_json,prices_json,promo_code,observed_at,updated_at,promotion_type,carrier_or_seller,route_scope,sale_window,travel_window,price_claim,currency,member_requirement,channel_requirement,first_observed_at,last_observed_at,cluster_fingerprint,primary_evidence_id) VALUES(?,?,'DISCOVERED',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(fingerprint) DO UPDATE SET updated_at=excluded.updated_at,last_observed_at=excluded.last_observed_at").bind(id,fp,p.market??null,p.airline??null,JSON.stringify(p.routes??[]),JSON.stringify(p.prices??[]),p.promo_code??null,obs.observed_at,nowIso,p.promotion_type??'FARE_PROMOTION',p.airline??p.seller??null,JSON.stringify(p.routes??[]),JSON.stringify({start:p.sale_start??null,end:p.sale_end??null}),JSON.stringify({start:p.travel_start??null,end:p.travel_end??null}),JSON.stringify(p.prices??[]),(p.prices??[])[0]?.currency??null,p.member_requirement??null,p.channel_requirement??null,obs.observed_at,obs.observed_at,fp,obs.observation_id),
     db.prepare("INSERT OR IGNORE INTO promotion_event_evidence(event_id,observation_id) VALUES(?,?)").bind(id,obs.observation_id)
   ]);
+  await enqueueCandidateSignal(db,{signal_type:"PROMOTION",signal_id:id,required_verification:"LIVE_REPRICE",priority_score:(p.prices??[]).length?70:50,route_scope:p.routes??[],price_claim:p.prices??[],source_evidence_id:obs.observation_id,observed_at:obs.observed_at},nowIso);
+  return id;
 }
 async function projectRouteSignal(db:D1Database,obs:{observation_id:string;observed_at:string},p:any){
   for(const route of p.routes??[]){const [origin,destination]=String(route).split('-');if(origin&&destination){const routeId=`${origin}-${destination}:${p.carrier_alias_id??'ANY'}:${p.service_type??'SCHEDULED'}`;await db.batch([db.prepare("INSERT OR IGNORE INTO route_universe(route_key,origin,destination,state,source_observation_id,observed_at) VALUES(?,?,?,'DISCOVERED',?,?)").bind(`${origin}-${destination}`,origin,destination,obs.observation_id,obs.observed_at),db.prepare("INSERT INTO route_universe_entries(route_id,origin_airport,destination_airport,carrier_alias_id,service_type,first_seen_at,last_seen_at,status,official_evidence_id) VALUES(?,?,?,?,?,?,?,'DISCOVERED',?) ON CONFLICT(route_id) DO UPDATE SET last_seen_at=excluded.last_seen_at,status=excluded.status,official_evidence_id=excluded.official_evidence_id").bind(routeId,origin,destination,p.carrier_alias_id??null,p.service_type??'SCHEDULED',obs.observed_at,obs.observed_at,obs.observation_id)]);}}
@@ -45,7 +48,10 @@ export async function projectDomainEvents(db:D1Database,nowIso:string,workerId="
         if(!mail)throw new Error("EMAIL_EVIDENCE_MISSING");
         if(mail.trust_class==="TRUSTED"){const signal=extractPromotionText(mail.subject,mail.market??"TW"); if(signal)await projectPromotionSignal(db,{observation_id:mail.observation_id,observed_at:mail.observed_at},signal,nowIso);}
       } else if(e.event_type==="AGENCY_OFFER"){
-        // AgencyInventoryOffer is already its own durable discovery object; no fare confirmation is implied here.
+        const a=await db.prepare("SELECT agency_offer_id,origin,destination,price,currency,source_evidence_id,observed_at,seller_verification_state,state FROM agency_inventory_offers WHERE agency_offer_id=?").bind(e.entity_id).first<any>();
+        if(!a)throw new Error("AGENCY_OFFER_MISSING");
+        const priority=(a.seller_verification_state==="VERIFIED"||a.state==="SELLER_CONFIRMED"||a.state==="CHECKOUT_REPRODUCED")?90:75;
+        await enqueueCandidateSignal(db,{signal_type:"AGENCY_CLEARANCE",signal_id:a.agency_offer_id,required_verification:"SELLER_RECHECK",priority_score:priority,route_scope:[`${a.origin}-${a.destination}`],price_claim:[{currency:a.currency,amount:a.price}],source_evidence_id:a.source_evidence_id,observed_at:a.observed_at},nowIso);
       }
       await ackDomainEvent(db,{id:Number(e.id),ok:true},nowIso);done++;
     }catch(err){await ackDomainEvent(db,{id:Number((e as any).id),ok:false,error:err instanceof Error?err.message:String(err)},nowIso)}
