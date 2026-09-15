@@ -26,7 +26,8 @@ required={
 'search_campaigns':{'campaign_id','profile_id','provider_id','departure_dates_json','trip_lengths_json','passengers_json','max_queries_per_signal','enabled','expires_at'},
 'provider_search_plans':{'plan_id','campaign_id','queue_id','provider_id','query_fingerprint','query_json','state','provider_job_id','next_attempt_at'},
 'candidate_offer_links':{'queue_id','plan_id','job_id','provider_offer_id','query_fingerprint'},
-'candidate_verification_results':{'result_id','queue_id','query_fingerprint','verification_state','reason','best_offer_id','live_offer_count','provider_count'} }
+'candidate_verification_results':{'result_id','queue_id','query_fingerprint','verification_state','reason','best_offer_id','live_offer_count','provider_count'},
+'policy_records':{'policy_record_id','policy_code','jurisdiction','traveler_document_class','observed_at','effective_from','effective_to','jurisdiction_timezone','travel_event','source_url','source_authority','source_snapshot_hash','refresh_margin_hours','ttl_hours','watch_window_hours','decision_status','status'} }
 for table, cols in required.items():
     got={r[1] for r in db.execute(f'pragma table_info({table})')}
     missing=cols-got

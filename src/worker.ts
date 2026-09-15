@@ -11,6 +11,7 @@ import { applySourceOnboardingReview, disableSource } from "./source_onboarding.
 import { recordProviderRuntimeReadback, providerReady } from "./provider_runtime.js";
 import { enqueueProviderSearch, leaseProviderJobs, completeProviderJob } from "./provider_jobs.js";
 import { upsertSearchCampaign, planSearchesForQueue, planDueCandidateSearches, dispatchProviderSearchPlans } from "./search_planner.js";
+import { ingestPolicyRecord, enrichItineraryPolicy } from "./policy_registry.js";
 
 export interface Env { DB:D1Database; INGEST_HMAC_SECRET:string; }
 const enc=new TextEncoder();
@@ -31,6 +32,14 @@ const worker={
     if(req.method==="POST"&&u.pathname==="/source-discovery/edge"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
       try{return json(await recordSourceDiscoveryEdge(env.DB,JSON.parse(body)),202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/policies/ingest"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await ingestPolicyRecord(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==="POLICY_RECORD_IMMUTABLE_CONFLICT"?409:400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/itineraries/policy-enrich"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await enrichItineraryPolicy(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/offers/ingest"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
