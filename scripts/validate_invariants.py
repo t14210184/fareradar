@@ -32,7 +32,8 @@ required={
 'runtime_payment_profiles':{'payment_profile_id','provider_id','payment_method_class','credential_binding','enabled','expires_at'},
 'provider_pricing_quotes':{'quote_id','provider_offer_id','provider_id','payment_profile_id','selected_services_json','payment_method_class','currency','fare_and_services_total','surcharge_total','grand_total','priced_at','raw_sha256','price_scope'},
 'fx_snapshots':{'fx_snapshot_id','base_currency','quote_currency','rate','rate_source','rate_observed_at','provider_spread','card_fx_fee','settlement_currency','expires_at','raw_sha256','source_id','canonical_url','authority'},
-'cost_evidence_snapshots':{'evidence_id','evidence_type','subject_key','amount','currency','source_id','source_observation_id','canonical_url','authority','access_basis','effective_event_at','observed_at','expires_at','raw_sha256','privacy_class','payload_json'} }
+'cost_evidence_snapshots':{'evidence_id','evidence_type','subject_key','amount','currency','source_id','source_observation_id','canonical_url','authority','access_basis','effective_event_at','observed_at','expires_at','raw_sha256','privacy_class','payload_json'},
+'cost_coverage_assertions':{'itinerary_id','category','status','evidence_id','authority','observed_at','expires_at','details_json'} }
 for table, cols in required.items():
     got={r[1] for r in db.execute(f'pragma table_info({table})')}
     missing=cols-got

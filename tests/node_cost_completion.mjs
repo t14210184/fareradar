@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import { upsertRuntimeProfile } from '../dist/profile.js';
-import { ingestFxSnapshot, ingestCostEvidenceSnapshot, upsertMandatoryCostEvidence, recomputeDirectAllInCost } from '../dist/cost_runtime.js';
+import { ingestFxSnapshot, ingestCostEvidenceSnapshot, upsertMandatoryCostEvidence, upsertCostCoverageAssertion, recomputeDirectAllInCost } from '../dist/cost_runtime.js';
 
 class Stmt {
   constructor(s){ this.s=s; this.args=[]; }
@@ -28,6 +28,9 @@ async function profile(id,seat){
 async function evidence(id,type,amount,currency,expiry='2026-09-15T00:25:00Z'){
   return ingestCostEvidenceSnapshot(db,{evidence_id:id,evidence_type:type,subject_key:id,amount,currency,authority:'SYNTHETIC_TEST',access_basis:'PRIVATE_RUNTIME',observed_at:'2026-09-15T00:02:00Z',expires_at:expiry,raw_sha256:'d'.repeat(64),privacy_class:'PRIVATE_MINIMAL',payload:{synthetic:true}},'2026-09-15T00:02:00Z');
 }
+async function coverage(itin){
+  for(const category of ['BOOKING_SERVICE_FEE','MANDATORY_HOTEL','DOCUMENT_FEE','MANDATORY_INSURANCE']) await upsertCostCoverageAssertion(db,{itinerary_id:itin,category,status:'NOT_APPLICABLE',evidence_id:`coverage:${itin}:${category}`,authority:'SYNTHETIC_TEST',observed_at:'2026-09-15T00:02:00Z',expires_at:'2026-09-15T00:25:00Z',details:{synthetic:true}},'2026-09-15T00:02:00Z');
+}
 async function base(itin,pid,quote='q-'+itin){
   await profile(pid,false);
   raw.prepare("insert into offer_snapshots(provider_offer_id,query_fingerprint,provider,currency,observed_at,expires_at,raw_sha256,offer_total,fare_freshness,cached_or_live) values(?,?,'duffel','TWD','2026-09-15T00:00:00Z','2026-09-15T01:00:00Z',?,5000,'REFRESHED_LIVE','LIVE')").run('off-'+itin,'fp-'+itin,'a'.repeat(64));
@@ -44,11 +47,14 @@ await evidence('ground:o','GROUND_ORIGIN',100,'TWD');
 await evidence('ground:d','GROUND_DESTINATION',1200,'JPY');
 await upsertMandatoryCostEvidence(db,{cost_id:'g1o',itinerary_id:'i1',type:'GROUND_ORIGIN',amount:100,currency:'TWD',dedupe_key:'ground-origin',source_evidence_id:'ground:o',certainty:'CONFIRMED',observed_at:'2026-09-15T00:02:00Z',evidence_expires_at:'2026-09-15T00:25:00Z'},'2026-09-15T00:02:00Z');
 await upsertMandatoryCostEvidence(db,{cost_id:'g1d',itinerary_id:'i1',type:'GROUND_DESTINATION',amount:1200,currency:'JPY',dedupe_key:'ground-destination',source_evidence_id:'ground:d',certainty:'CONFIRMED',observed_at:'2026-09-15T00:02:00Z',evidence_expires_at:'2026-09-15T00:25:00Z',fx_snapshot_id:'fx-jpy'},'2026-09-15T00:02:00Z');
+const coverageMissing=await recomputeDirectAllInCost(db,'i1','2026-09-15T00:02:30Z');
+await coverage('i1');
 const complete=await recomputeDirectAllInCost(db,'i1','2026-09-15T00:03:00Z');
 const stale=await recomputeDirectAllInCost(db,'i1','2026-09-15T00:31:00Z');
 
 await base('i2','p2','q-i2');
 raw.prepare("update runtime_profiles set seat_required=1 where profile_id='p2'").run();
+await coverage('i2');
 await evidence('ground:o2','GROUND_ORIGIN',100,'TWD');
 await evidence('ground:d2','GROUND_DESTINATION',200,'TWD');
 await evidence('seat:2','SEAT_SELECTION',300,'TWD');
@@ -65,4 +71,4 @@ try{ await upsertMandatoryCostEvidence(db,{cost_id:'bad-mismatch',itinerary_id:'
 let conflictError='';
 try{ await ingestCostEvidenceSnapshot(db,{evidence_id:'seat:2',evidence_type:'SEAT_SELECTION',subject_key:'seat:2',amount:301,currency:'TWD',authority:'SYNTHETIC_TEST',access_basis:'PRIVATE_RUNTIME',observed_at:'2026-09-15T00:02:00Z',expires_at:'2026-09-15T00:25:00Z',raw_sha256:'d'.repeat(64),privacy_class:'PRIVATE_MINIMAL',payload:{synthetic:true}},'2026-09-15T00:02:00Z'); }catch(e){ conflictError=e.message; }
 
-console.log(JSON.stringify({complete,stale,seatMissing,seatComplete,missingError,mismatchError,conflictError,i1:raw.prepare("select cash_trip_cost_twd,cost_complete from itinerary_candidates where itinerary_id='i1'").get(),i2:raw.prepare("select cash_trip_cost_twd,cost_complete from itinerary_candidates where itinerary_id='i2'").get()}));
+console.log(JSON.stringify({coverageMissing,complete,stale,seatMissing,seatComplete,missingError,mismatchError,conflictError,i1:raw.prepare("select cash_trip_cost_twd,cost_complete from itinerary_candidates where itinerary_id='i1'").get(),i2:raw.prepare("select cash_trip_cost_twd,cost_complete from itinerary_candidates where itinerary_id='i2'").get()}));

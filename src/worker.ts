@@ -14,7 +14,7 @@ import { upsertSearchCampaign, planSearchesForQueue, planDueCandidateSearches, d
 import { ingestPolicyRecord, enrichItineraryPolicy } from "./policy_registry.js";
 import { upsertRuntimeProfile } from "./profile.js";
 import { upsertPaymentProfile, enqueueCheckoutReprice, ingestPricingQuote } from "./checkout_pricing.js";
-import { ingestFxSnapshot, ingestCostEvidenceSnapshot, upsertMandatoryCostEvidence, attachFxToCost, recomputeDirectAllInCost } from "./cost_runtime.js";
+import { ingestFxSnapshot, ingestCostEvidenceSnapshot, upsertMandatoryCostEvidence, upsertCostCoverageAssertion, attachFxToCost, recomputeDirectAllInCost } from "./cost_runtime.js";
 
 export interface Env { DB:D1Database; INGEST_HMAC_SECRET:string; }
 const enc=new TextEncoder();
@@ -135,6 +135,10 @@ const worker={
     if(req.method==="POST"&&u.pathname==="/cost-evidence/upsert"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
       try{return json({ok:true,...await upsertMandatoryCostEvidence(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/cost-coverage/upsert"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await upsertCostCoverageAssertion(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/cost/fx-attach"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
