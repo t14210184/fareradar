@@ -10,3 +10,4 @@ def test_direct_all_in_cost_requires_ground_fresh_fx_and_profile_seat_cost():
     assert x['missingError']=='COST_EVIDENCE_NOT_FOUND'
     assert x['mismatchError']=='COST_EVIDENCE_VALUE_MISMATCH'
     assert x['conflictError']=='COST_EVIDENCE_ID_CONFLICT'
+    assert x['coverageEvidenceError']=='COST_COVERAGE_EVIDENCE_NOT_FOUND'

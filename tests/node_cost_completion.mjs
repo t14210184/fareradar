@@ -29,7 +29,11 @@ async function evidence(id,type,amount,currency,expiry='2026-09-15T00:25:00Z'){
   return ingestCostEvidenceSnapshot(db,{evidence_id:id,evidence_type:type,subject_key:id,amount,currency,authority:'SYNTHETIC_TEST',access_basis:'PRIVATE_RUNTIME',observed_at:'2026-09-15T00:02:00Z',expires_at:expiry,raw_sha256:'d'.repeat(64),privacy_class:'PRIVATE_MINIMAL',payload:{synthetic:true}},'2026-09-15T00:02:00Z');
 }
 async function coverage(itin){
-  for(const category of ['BOOKING_SERVICE_FEE','MANDATORY_HOTEL','DOCUMENT_FEE','MANDATORY_INSURANCE']) await upsertCostCoverageAssertion(db,{itinerary_id:itin,category,status:'NOT_APPLICABLE',evidence_id:`coverage:${itin}:${category}`,authority:'SYNTHETIC_TEST',observed_at:'2026-09-15T00:02:00Z',expires_at:'2026-09-15T00:25:00Z',details:{synthetic:true}},'2026-09-15T00:02:00Z');
+  for(const category of ['BOOKING_SERVICE_FEE','MANDATORY_HOTEL','DOCUMENT_FEE','MANDATORY_INSURANCE']){
+    const id=`coverage:${itin}:${category}`;
+    await evidence(id,category,0,'TWD');
+    await upsertCostCoverageAssertion(db,{itinerary_id:itin,category,status:'NOT_APPLICABLE',evidence_id:id,evidence_kind:'COST_EVIDENCE',authority:'SYNTHETIC_TEST',observed_at:'2026-09-15T00:02:00Z',expires_at:'2026-09-15T00:25:00Z',details:{synthetic:true}},'2026-09-15T00:02:00Z');
+  }
 }
 async function base(itin,pid,quote='q-'+itin){
   await profile(pid,false);
@@ -68,7 +72,9 @@ let missingError='';
 try{ await upsertMandatoryCostEvidence(db,{cost_id:'bad-missing',itinerary_id:'i2',type:'SEAT_SELECTION',amount:1,currency:'TWD',dedupe_key:'bad-missing',source_evidence_id:'missing',certainty:'CONFIRMED',observed_at:'2026-09-15T00:02:00Z',evidence_expires_at:'2026-09-15T00:25:00Z'},'2026-09-15T00:02:00Z'); }catch(e){ missingError=e.message; }
 let mismatchError='';
 try{ await upsertMandatoryCostEvidence(db,{cost_id:'bad-mismatch',itinerary_id:'i2',type:'SEAT_SELECTION',amount:999,currency:'TWD',dedupe_key:'bad-mismatch',source_evidence_id:'seat:2',certainty:'CONFIRMED',observed_at:'2026-09-15T00:02:00Z',evidence_expires_at:'2026-09-15T00:25:00Z'},'2026-09-15T00:02:00Z'); }catch(e){ mismatchError=e.message; }
+let coverageEvidenceError='';
+try{ await upsertCostCoverageAssertion(db,{itinerary_id:'i2',category:'DOCUMENT_FEE',status:'NOT_APPLICABLE',evidence_id:'does-not-exist',evidence_kind:'COST_EVIDENCE',authority:'SYNTHETIC_TEST',observed_at:'2026-09-15T00:02:00Z',expires_at:'2026-09-15T00:25:00Z'},'2026-09-15T00:02:00Z'); }catch(e){ coverageEvidenceError=e.message; }
 let conflictError='';
 try{ await ingestCostEvidenceSnapshot(db,{evidence_id:'seat:2',evidence_type:'SEAT_SELECTION',subject_key:'seat:2',amount:301,currency:'TWD',authority:'SYNTHETIC_TEST',access_basis:'PRIVATE_RUNTIME',observed_at:'2026-09-15T00:02:00Z',expires_at:'2026-09-15T00:25:00Z',raw_sha256:'d'.repeat(64),privacy_class:'PRIVATE_MINIMAL',payload:{synthetic:true}},'2026-09-15T00:02:00Z'); }catch(e){ conflictError=e.message; }
 
-console.log(JSON.stringify({coverageMissing,complete,stale,seatMissing,seatComplete,missingError,mismatchError,conflictError,i1:raw.prepare("select cash_trip_cost_twd,cost_complete from itinerary_candidates where itinerary_id='i1'").get(),i2:raw.prepare("select cash_trip_cost_twd,cost_complete from itinerary_candidates where itinerary_id='i2'").get()}));
+console.log(JSON.stringify({coverageMissing,complete,stale,seatMissing,seatComplete,missingError,mismatchError,coverageEvidenceError,conflictError,i1:raw.prepare("select cash_trip_cost_twd,cost_complete from itinerary_candidates where itinerary_id='i1'").get(),i2:raw.prepare("select cash_trip_cost_twd,cost_complete from itinerary_candidates where itinerary_id='i2'").get()}));
