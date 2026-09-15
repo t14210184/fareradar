@@ -20,9 +20,9 @@ import { ingestCarrierTicketingPolicy, evaluateTicketingGuards } from "./ticketi
 import { ingestConnectionBufferPolicy, ingestAirportChangePolicy, evaluateTransferBoundary } from "./transfer_runtime.js";
 import { evaluateActionableFromDb } from "./readiness_runtime.js";
 import { buildCanonicalCandidateAlert } from "./alert_runtime.js";
-import { authorizeRequest, principalAllowsPayload, cleanupExpiredNonces, type AuthEnv } from "./auth.js";
+import { authorizeRequest, principalAllowsPayload, cleanupExpiredNonces, workerTokenAuthorized, workerLeaseAllowsSource, type AuthEnv } from "./auth.js";
 
-export interface Env extends AuthEnv {}
+export interface Env extends AuthEnv { WORKER_TOKEN?:string; }
 async function authorized(req:Request,body:string,env:Env){return authorizeRequest(req,body,env);}
 function json(data:unknown,status=200){return new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json"}});}
 
@@ -67,8 +67,8 @@ const worker={
       try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json({ok:true,...await ingestEmailEvidence(env.DB,payload,new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/ingest"){
-      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401);
-      try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json({ok:true,...await ingestSourceObservation(env.DB,payload,new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+      const body=await req.text(); if(!workerTokenAuthorized(req,env.WORKER_TOKEN))return json({error:"UNAUTHORIZED"},401);
+      try{const payload=JSON.parse(body) as {worker_id:string;lease_job_id:string;source_id:string};const now=new Date().toISOString();if(!payload.worker_id||!payload.lease_job_id||!payload.source_id||!await workerLeaseAllowsSource(env.DB,{job_id:payload.lease_job_id,worker_id:payload.worker_id,source_id:payload.source_id},now))return json({error:"LIVE_SOURCE_LEASE_REQUIRED"},403);return json({ok:true,...await ingestSourceObservation(env.DB,payload as any,now)},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/candidate/evaluate"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
@@ -98,10 +98,10 @@ const worker={
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); return json({state:await ackDomainEvent(env.DB,JSON.parse(body),new Date().toISOString())});
     }
     if(req.method==="POST"&&u.pathname==="/verification-jobs/lease"){
-      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {worker_id:string;limit?:number}; return json({jobs:await leaseVerificationJobs(env.DB,new Date().toISOString(),p.worker_id,Math.min(p.limit??5,5))});
+      const body=await req.text(); if(!workerTokenAuthorized(req,env.WORKER_TOKEN))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {worker_id:string;limit?:number}; if(!p.worker_id)return json({error:"WORKER_ID_REQUIRED"},400); return json({jobs:await leaseVerificationJobs(env.DB,new Date().toISOString(),p.worker_id,Math.min(p.limit??5,5))});
     }
     if(req.method==="POST"&&u.pathname==="/verification-jobs/complete"){
-      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {job_id:string;source_id:string;success:boolean;duplicate?:boolean;schema_drift?:boolean;etag?:string;last_modified?:string;content_sha256?:string;error?:string}; const now=new Date().toISOString(); const health=await completeSourceFetch(env.DB,p,now); const state=await completeVerificationJob(env.DB,p,now); return json({ok:true,health,state});
+      const body=await req.text(); if(!workerTokenAuthorized(req,env.WORKER_TOKEN))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {job_id:string;worker_id:string;source_id:string;success:boolean;duplicate?:boolean;schema_drift?:boolean;etag?:string;last_modified?:string;content_sha256?:string;error?:string}; const now=new Date().toISOString(); if(!p.worker_id||!await workerLeaseAllowsSource(env.DB,{job_id:p.job_id,worker_id:p.worker_id,source_id:p.source_id},now))return json({error:"LIVE_SOURCE_LEASE_REQUIRED"},403); const health=await completeSourceFetch(env.DB,p,now); const state=await completeVerificationJob(env.DB,p,now); return json({ok:true,health,state});
     }
     if(req.method==="POST"&&u.pathname==="/candidate-priority/lease"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {provider_id:string;worker_id:string;verification_type:"LIVE_REPRICE"|"SELLER_RECHECK";limit?:number}; const now=new Date().toISOString(); const ready=await providerReady(env.DB,{...p,background:true},now); if(!ready.ready)return json({error:ready.reason},409); return json({signals:await leaseCandidateSignals(env.DB,now,p.worker_id,Math.min(p.limit??5,5),90,p.verification_type)});

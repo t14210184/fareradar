@@ -42,3 +42,13 @@ export function principalAllowsPayload(p:AuthPrincipal,payload:any,path:string){
   return true;
 }
 export async function cleanupExpiredNonces(db:D1Database,nowIso:string){await db.prepare("DELETE FROM used_request_nonces WHERE expires_at<=?").bind(nowIso).run();}
+
+export function workerTokenAuthorized(req:Request,workerToken:string|undefined){
+  if(!workerToken)return false;
+  const supplied=req.headers.get("x-fare-worker-token")??(req.headers.get("authorization")?.replace(/^Bearer\s+/i,"")??"");
+  return !!supplied&&safeEq(supplied,workerToken);
+}
+export async function workerLeaseAllowsSource(db:D1Database,input:{job_id:string;worker_id:string;source_id:string},nowIso:string){
+  const row=await db.prepare("SELECT source_id,claimed_by,lease_until,state,target_class FROM verification_jobs WHERE job_id=?").bind(input.job_id).first<any>();
+  return !!(row&&row.target_class==="EXTERNAL_HEAVY"&&row.state==="LEASED"&&row.claimed_by===input.worker_id&&row.source_id===input.source_id&&row.lease_until&&Date.parse(row.lease_until)>Date.parse(nowIso));
+}
