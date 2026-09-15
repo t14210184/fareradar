@@ -4,11 +4,11 @@ ROOT=pathlib.Path(__file__).resolve().parents[1]
 db=sqlite3.connect(':memory:')
 for p in sorted((ROOT/'migrations').glob('*.sql')): db.executescript(p.read_text())
 required={
-'itinerary_candidates':{'itinerary_id','strategy_type','verification_state'},
+'itinerary_candidates':{'itinerary_id','profile_id','strategy_type','verification_state'},
 'offer_snapshots':{'provider_offer_id','query_fingerprint','provider','raw_sha256','offer_total','fare_freshness','cached_or_live','offer_structure_json'},
 'ticket_components':{'ticket_id','pnr_group','connection_protection_type'},
 'transfer_boundaries':{'from_ticket_id','to_ticket_id','scheduled_buffer_minutes','required_buffer_minutes','evidence_id'},
-'cost_components':{'inclusion_state','source_offer_id','policy_evidence_id','pricing_quote_id','dedupe_key','paid_state','refundable'},
+'cost_components':{'inclusion_state','source_offer_id','policy_evidence_id','source_evidence_id','pricing_quote_id','dedupe_key','paid_state','refundable','evidence_expires_at'},
 'readiness_facets':{'facet_type','status','expires_at','authority','evidence_id'},
 'document_requirements':{'jurisdiction','travel_event','traveler_document_class','valid_for_event_at','authority_source','source_snapshot_id'},
 'four_leg_liabilities':{'cycle_id','component_type','remaining_exposure','recoverable_amount'},
@@ -30,7 +30,8 @@ required={
 'policy_records':{'policy_record_id','policy_code','jurisdiction','traveler_document_class','observed_at','effective_from','effective_to','jurisdiction_timezone','travel_event','source_url','source_authority','source_snapshot_hash','refresh_margin_hours','ttl_hours','watch_window_hours','decision_status','status'},
 'runtime_profiles':{'profile_id','home_airports_json','checked_bag_pattern','baggage_kg','seat_required','red_eye_ok','self_transfer_ok','overnight_transfer_ok','airport_change_ok','mainland_permit_status','korea_entry_profile','foreign_origin_ok','positioning_cost_attribution','max_positioning_cost_twd','value_of_time_twd_per_hour','min_savings_for_self_transfer_twd','currency'},
 'runtime_payment_profiles':{'payment_profile_id','provider_id','payment_method_class','credential_binding','enabled','expires_at'},
-'provider_pricing_quotes':{'quote_id','provider_offer_id','provider_id','payment_profile_id','selected_services_json','payment_method_class','currency','fare_and_services_total','surcharge_total','grand_total','priced_at','raw_sha256','price_scope'} }
+'provider_pricing_quotes':{'quote_id','provider_offer_id','provider_id','payment_profile_id','selected_services_json','payment_method_class','currency','fare_and_services_total','surcharge_total','grand_total','priced_at','raw_sha256','price_scope'},
+'fx_snapshots':{'fx_snapshot_id','base_currency','quote_currency','rate','rate_source','rate_observed_at','provider_spread','card_fx_fee','settlement_currency','expires_at','raw_sha256'} }
 for table, cols in required.items():
     got={r[1] for r in db.execute(f'pragma table_info({table})')}
     missing=cols-got

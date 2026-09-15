@@ -5,7 +5,7 @@ def test_confirmed_structured_direct_offer_projects_non_actionable_candidate_unt
     p=subprocess.run(['node','tests/node_direct_candidate_projection.mjs'],cwd=ROOT,text=True,capture_output=True,check=True)
     x=json.loads(p.stdout)
     assert x['result']['projection']['projected']==1
-    assert x['itin']['strategy_type']=='S00_DIRECT_RT' and x['itin']['verification_state']=='CONFIRMED'
+    assert x['itin']['strategy_type']=='S00_DIRECT_RT' and x['itin']['verification_state']=='CONFIRMED' and x['itin']['profile_id']=='synthetic'
     assert x['itin']['cash_trip_cost_twd'] is None and x['itin']['cost_complete']==0
     assert x['ticket']['ticket_type']=='ROUND_TRIP' and x['ticket']['connection_protection_type']=='NOT_APPLICABLE_DIRECT'
     assert x['ticket']['validating_carrier']=='TT' and len(x['ticket']['segments'])==2

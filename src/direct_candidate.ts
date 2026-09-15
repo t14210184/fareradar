@@ -15,6 +15,9 @@ export async function projectDirectVerifiedCandidate(db:D1Database,input:{queue_
   const structure=parseStructure(offer.offer_structure_json);if(!directSlices(structure))return {projected:false,reason:"COMPLEX_OR_INCOMPLETE_STRUCTURE"};
   const strategy=strategyFor(structure);if(strategy==="UNSUPPORTED")return {projected:false,reason:"NON_ROUNDTRIP_TWO_SLICE"};
   const q=await db.prepare("SELECT source_evidence_id FROM candidate_priority_queue WHERE queue_id=?").bind(input.queue_id).first<any>();if(!q)return {projected:false,reason:"QUEUE_NOT_FOUND"};
+  const profileRows=(await db.prepare("SELECT DISTINCT c.profile_id FROM provider_search_plans p JOIN search_campaigns c ON c.campaign_id=p.campaign_id WHERE p.queue_id=? AND p.query_fingerprint=?").bind(input.queue_id,input.query_fingerprint).all<{profile_id:string}>()).results;
+  const profileIds=[...new Set(profileRows.map(x=>x.profile_id).filter(Boolean))];if(profileIds.length!==1)return {projected:false,reason:profileIds.length?"PROFILE_LINEAGE_AMBIGUOUS":"PROFILE_LINEAGE_MISSING"};
+  const profileExists=await db.prepare("SELECT profile_id FROM runtime_profiles WHERE profile_id=?").bind(profileIds[0]).first();if(!profileExists)return {projected:false,reason:"PROFILE_LINEAGE_MISSING"};
   const itineraryId=`direct:${safe(input.queue_id)}:${input.query_fingerprint}`;const intakeId=`direct-project:${safe(input.queue_id)}:${input.query_fingerprint}`;
   const evidence=`offer:${offer.provider_offer_id}`;const fallbackExpiry=plusMinutes(nowIso,15);const offerExpiry=offer.expires_at&&Number.isFinite(Date.parse(offer.expires_at))?offer.expires_at:null;
   const farePass=input.verification_state==="CONFIRMED"&&offerExpiry&&Date.parse(offerExpiry)>Date.parse(nowIso);const expiry=offerExpiry??fallbackExpiry;
@@ -31,7 +34,7 @@ export async function projectDirectVerifiedCandidate(db:D1Database,input:{queue_
   ];
   const plan:CandidatePlanInput={
     intake_id:intakeId,discovery_evidence_ids:q.source_evidence_id?[q.source_evidence_id]:[],
-    itinerary:{itinerary_id:itineraryId,strategy_type:strategy,cash_trip_cost_twd:null,cost_complete:false,risk_adjusted_cost_twd:null,scenario_cost_twd:null,generalized_cost_twd:null,risk_class:"LOW_COMPLEXITY_INCOMPLETE",verification_state:input.verification_state},
+    itinerary:{itinerary_id:itineraryId,profile_id:profileIds[0],strategy_type:strategy,cash_trip_cost_twd:null,cost_complete:false,risk_adjusted_cost_twd:null,scenario_cost_twd:null,generalized_cost_twd:null,risk_class:"LOW_COMPLEXITY_INCOMPLETE",verification_state:input.verification_state},
     tickets:[{ticket_id:`ticket:${itineraryId}`,pnr_group:`offer:${offer.provider_offer_id}`,provider:offer.provider,ticket_type:structure.slices.length===1?"ONE_WAY":"ROUND_TRIP",connection_protection_type:"NOT_APPLICABLE_DIRECT",validating_carrier:carriers.length===1?carriers[0]:null,segments}],
     transfers:[],
     costs:[{cost_id:`cost:${itineraryId}:offer`,type:"OFFER_TOTAL",amount:Number(offer.offer_total),currency:offer.currency,twd_amount:offer.currency==="TWD"?Number(offer.offer_total):null,inclusion_state:"INCLUDED_IN_OFFER",source_offer_id:offer.provider_offer_id,dedupe_key:"offer-total",certainty:input.verification_state,paid_state:"UNPAID",refundable:false,observed_at:offer.observed_at}],

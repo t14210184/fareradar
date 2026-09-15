@@ -14,6 +14,7 @@ import { upsertSearchCampaign, planSearchesForQueue, planDueCandidateSearches, d
 import { ingestPolicyRecord, enrichItineraryPolicy } from "./policy_registry.js";
 import { upsertRuntimeProfile } from "./profile.js";
 import { upsertPaymentProfile, enqueueCheckoutReprice, ingestPricingQuote } from "./checkout_pricing.js";
+import { ingestFxSnapshot, upsertMandatoryCostEvidence, attachFxToCost, recomputeDirectAllInCost } from "./cost_runtime.js";
 
 export interface Env { DB:D1Database; INGEST_HMAC_SECRET:string; }
 const enc=new TextEncoder();
@@ -122,6 +123,22 @@ const worker={
     if(req.method==="POST"&&u.pathname==="/pricing-quotes/ingest"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
       try{return json({ok:true,...await ingestPricingQuote(env.DB,JSON.parse(body))},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==="PRICING_QUOTE_ID_CONFLICT"?409:400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/fx-snapshots/ingest"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await ingestFxSnapshot(env.DB,JSON.parse(body))},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==="FX_SNAPSHOT_ID_CONFLICT"?409:400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/cost-evidence/upsert"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await upsertMandatoryCostEvidence(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/cost/fx-attach"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await attachFxToCost(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/cost/recompute-direct"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{const p=JSON.parse(body);return json({ok:true,...await recomputeDirectAllInCost(env.DB,p.itinerary_id,new Date().toISOString())},200);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/provider-jobs/lease"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
