@@ -3,7 +3,7 @@ import { validateCandidatePlan } from "./intake.js";
 import { verifyMultiProvider, amadeusCanConfirm } from "./verification.js";
 import { policyUsable } from "./policy.js";
 import { provenanceValid, promotionFingerprint, promoEligible, clearanceState, emailTrust, dispatchAllowed, adaptiveSchedule, routeUniverseDiff, socialRetention, extractPromotionText } from "./source.js";
-import { ACTIVE_STRATEGIES, boundedExpand, foreignOriginCycleCost, priceBeatEligible } from "./strategy.js";
+import { ACTIVE_STRATEGIES, boundedExpand, boundedStrategySearch, foreignOriginCycleCost, priceBeatEligible } from "./strategy.js";
 import { complexAlertCard } from "./alerts.js";
 import { quotaDegrade, win11State, burstDecision, workerBudget } from "./capacity.js";
 import { onboardingCandidates } from "./discovery.js";
@@ -34,6 +34,7 @@ switch(process.argv[2]){
   case "extract-promo-text": out=extractPromotionText(input.text,input.market);break;
   case "strategies": out=ACTIVE_STRATEGIES;break;
   case "bounded-expand": out=boundedExpand(input.items,input.maxTickets);break;
+  case "strategy-search": out=boundedStrategySearch(input.items,input.options);break;
   case "foreign-cycle-cost": out=foreignOriginCycleCost(input);break;
   case "price-beat": out=priceBeatEligible(input);break;
   case "complex-alert": out=complexAlertCard(input);break;
