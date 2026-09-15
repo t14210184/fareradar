@@ -1,6 +1,7 @@
 import type { D1Database } from "./types.js";
 import { emailTrust } from "./source.js";
 import { assertAgencyUrlAllowed } from "./agency_security.js";
+import { agencyOfferExpiryReason } from "./agency_expiry.js";
 function shaOK(x:string){return /^[a-f0-9]{64}$/i.test(x)}
 function timeOK(x:string){return Number.isFinite(Date.parse(x))}
 export async function ingestAgencyOffer(db:D1Database,input:any,nowIso:string){
@@ -11,14 +12,21 @@ export async function ingestAgencyOffer(db:D1Database,input:any,nowIso:string){
   if(!agency||agency.status!=="ENABLED"||Number(agency.verified_business)!==1||agency.source_id!==input.source_id||!agency.terms_snapshot_at||agency.terms_snapshot_at==='RECHECK_REQUIRED')throw new Error('AGENCY_PARTNER_NOT_ENABLED');
   const src=await db.prepare("SELECT access_basis FROM source_registry WHERE source_id=?").bind(input.source_id).first<any>(); if(!src)throw new Error('SOURCE_NOT_ALLOWED');
   await assertAgencyUrlAllowed(db,input.agency_id,input.booking_or_contact_channel); if(input.canonical_url)await assertAgencyUrlAllowed(db,input.agency_id,input.canonical_url,input.booking_or_contact_channel);
-  const offerPayload={agency_offer_id:input.agency_offer_id,agency_id:input.agency_id,product_id:input.product_id,origin:input.origin,destination:input.destination,price:input.price,currency:input.currency,state:'AGENCY_CLAIMED'};
+  const initialExpiry=agencyOfferExpiryReason({seats_available:input.seats_available??null,booking_deadline:input.booking_deadline??null,payment_deadline:input.payment_deadline??null,ticketing_deadline:input.ticketing_deadline??null},nowIso);
+  const initialState=initialExpiry?.new_state??'AGENCY_CLAIMED';
+  const initialReason=initialExpiry?.reason??null;
+  const offerPayload={agency_offer_id:input.agency_offer_id,agency_id:input.agency_id,product_id:input.product_id,origin:input.origin,destination:input.destination,price:input.price,currency:input.currency,state:initialState};
   await db.batch([
     db.prepare("INSERT OR IGNORE INTO source_observations(observation_id,source_id,observed_at,canonical_url,content_sha256,parser_version,access_basis,privacy_class,access_basis_snapshot,retention_until,content_version) VALUES(?,?,?,?,?,?,?,'PARTNER_STRUCTURED',?,?,1)").bind(input.observation_id,input.source_id,input.observed_at,input.canonical_url??null,input.content_sha256,input.parser_version??'agency-intake-1',src.access_basis,src.access_basis,new Date(Date.parse(input.observed_at)+180*86400000).toISOString()),
-    db.prepare("INSERT INTO agency_inventory_offers(agency_offer_id,agency_id,seller_verification_state,product_id,allotment_type,origin,destination,flight_number,departure_at,return_at,price,currency,tax_inclusion,baggage,seats_total,seats_available,inventory_hint,minimum_group_size,booking_deadline,ticketing_deadline,refund_change_terms,booking_or_contact_channel,observed_at,source_evidence_id,state) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(agency_offer_id) DO UPDATE SET seats_available=excluded.seats_available,inventory_hint=excluded.inventory_hint,booking_deadline=excluded.booking_deadline,ticketing_deadline=excluded.ticketing_deadline,observed_at=excluded.observed_at,state=CASE WHEN agency_inventory_offers.state IN ('SELLER_CONFIRMED','CHECKOUT_REPRODUCED') THEN agency_inventory_offers.state ELSE excluded.state END")
-      .bind(input.agency_offer_id,input.agency_id,'VERIFIED_BUSINESS',input.product_id,input.allotment_type,input.origin,input.destination,input.flight_number??null,input.departure_at,input.return_at??null,input.price,input.currency,input.tax_inclusion,input.baggage??null,input.seats_total??null,input.seats_available??null,input.inventory_hint??null,input.minimum_group_size??null,input.booking_deadline??null,input.ticketing_deadline??null,input.refund_change_terms??null,input.booking_or_contact_channel,input.observed_at,input.observation_id,'AGENCY_CLAIMED'),
+    db.prepare("INSERT INTO agency_inventory_offers(agency_offer_id,agency_id,seller_verification_state,product_id,allotment_type,origin,destination,flight_number,departure_at,return_at,price,currency,tax_inclusion,baggage,seats_total,seats_available,inventory_hint,minimum_group_size,booking_deadline,payment_deadline,ticketing_deadline,refund_change_terms,booking_or_contact_channel,observed_at,source_evidence_id,state,expired_at,expiry_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(agency_offer_id) DO UPDATE SET seats_available=excluded.seats_available,inventory_hint=excluded.inventory_hint,booking_deadline=excluded.booking_deadline,payment_deadline=excluded.payment_deadline,ticketing_deadline=excluded.ticketing_deadline,observed_at=excluded.observed_at,state=CASE WHEN agency_inventory_offers.state IN ('SELLER_CONFIRMED','CHECKOUT_REPRODUCED') AND excluded.state='AGENCY_CLAIMED' THEN agency_inventory_offers.state ELSE excluded.state END,expired_at=CASE WHEN excluded.state='AGENCY_CLAIMED' THEN NULL ELSE excluded.expired_at END,expiry_reason=CASE WHEN excluded.state='AGENCY_CLAIMED' THEN NULL ELSE excluded.expiry_reason END")
+      .bind(input.agency_offer_id,input.agency_id,'VERIFIED_BUSINESS',input.product_id,input.allotment_type,input.origin,input.destination,input.flight_number??null,input.departure_at,input.return_at??null,input.price,input.currency,input.tax_inclusion,input.baggage??null,input.seats_total??null,input.seats_available??null,input.inventory_hint??null,input.minimum_group_size??null,input.booking_deadline??null,input.payment_deadline??null,input.ticketing_deadline??null,input.refund_change_terms??null,input.booking_or_contact_channel,input.observed_at,input.observation_id,initialState,initialExpiry?.effective_at??null,initialReason),
     db.prepare("INSERT OR IGNORE INTO domain_outbox(event_type,entity_id,payload_json,state,attempts,created_at) VALUES('AGENCY_OFFER',?,?,'PENDING',0,?)").bind(input.agency_offer_id,JSON.stringify(offerPayload),nowIso)
   ]);
-  return {agency_offer_id:input.agency_offer_id,state:'AGENCY_CLAIMED'};
+  if(initialExpiry){
+    await db.prepare("INSERT OR IGNORE INTO agency_offer_lifecycle_events(event_id,agency_offer_id,previous_state,new_state,reason,effective_at,created_at) VALUES(?,?,?,?,?,?,?)")
+      .bind(`agency-life:${input.agency_offer_id}:${initialExpiry.new_state}:${initialExpiry.reason}`,input.agency_offer_id,'INGESTED',initialExpiry.new_state,initialExpiry.reason,initialExpiry.effective_at,nowIso).run();
+  }
+  return {agency_offer_id:input.agency_offer_id,state:initialState};
 }
 
 export async function ingestEmailEvidence(db:D1Database,input:any,nowIso:string){

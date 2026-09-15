@@ -52,8 +52,10 @@ export async function projectDomainEvents(db:D1Database,nowIso:string,workerId="
         if(!mail)throw new Error("EMAIL_EVIDENCE_MISSING");
         if(mail.trust_class==="TRUSTED"){const signal=extractPromotionText(mail.subject,mail.market??"TW"); if(signal)await projectPromotionSignal(db,{observation_id:mail.observation_id,observed_at:mail.observed_at},signal,nowIso);}
       } else if(e.event_type==="AGENCY_OFFER"){
-        const a=await db.prepare("SELECT agency_offer_id,origin,destination,price,currency,source_evidence_id,observed_at,seller_verification_state,state FROM agency_inventory_offers WHERE agency_offer_id=?").bind(e.entity_id).first<any>();
+        const a=await db.prepare("SELECT agency_offer_id,origin,destination,price,currency,source_evidence_id,observed_at,seller_verification_state,state,seats_available,booking_deadline,payment_deadline,ticketing_deadline FROM agency_inventory_offers WHERE agency_offer_id=?").bind(e.entity_id).first<any>();
         if(!a)throw new Error("AGENCY_OFFER_MISSING");
+        const deadlinePassed=[a.booking_deadline,a.payment_deadline,a.ticketing_deadline].some((x:any)=>x&&Number.isFinite(Date.parse(x))&&Date.parse(x)<=Date.parse(nowIso));
+        if(a.state==='EXPIRED'||a.state==='SOLD_OUT'||Number(a.seats_available)===0||deadlinePassed){await ackDomainEvent(db,{id:Number(e.id),worker_id:workerId,ok:true},nowIso);done++;continue;}
         const priority=(a.seller_verification_state==="VERIFIED"||a.state==="SELLER_CONFIRMED"||a.state==="CHECKOUT_REPRODUCED")?90:75;
         await enqueueCandidateSignal(db,{signal_type:"AGENCY_CLEARANCE",signal_id:a.agency_offer_id,required_verification:"SELLER_RECHECK",priority_score:priority,route_scope:[`${a.origin}-${a.destination}`],price_claim:[{currency:a.currency,amount:a.price}],source_evidence_id:a.source_evidence_id,observed_at:a.observed_at},nowIso);
       } else if(e.event_type==="CONFIRMED_CANDIDATE"){

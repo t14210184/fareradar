@@ -36,3 +36,21 @@ def test_agency_checkout_reproduction_requires_complete_total_and_live_lease():
     assert x['ev']=={'result_state':'CHECKOUT_REPRODUCED','total_includes_taxes':1,'total_includes_mandatory_fees':1,'payment_dispatched':0}
     assert x['payload']['verification_state']=='CHECKOUT_REPRODUCED'
     assert x['payload']['actionable'] is False and x['payload']['bookable'] is False
+
+
+def test_agency_offer_deadline_expiry_revokes_stale_provisional():
+    import json, pathlib, subprocess
+    root=pathlib.Path(__file__).resolve().parents[2]
+    p=subprocess.run(['node','tests/node_agency_expiry.mjs'],cwd=root,text=True,capture_output=True,check=True)
+    x=json.loads(p.stdout)
+    assert x['before']['state']=='CHECKOUT_REPRODUCED'
+    assert x['result']['expired']==1 and x['again']['expired']==0
+    assert x['after']['state']=='EXPIRED' and x['after']['seller_verification_state']=='REVOKED'
+    assert x['after']['expiry_reason']=='PAYMENT_DEADLINE_PASSED'
+    assert x['life']['previous_state']=='CHECKOUT_REPRODUCED' and x['life']['new_state']=='EXPIRED'
+    assert x['pendingOld']==0 and x['cancelled']>=1
+    assert x['expiryPayload']['kind']=='DEAL-UPDATE' and x['expiryPayload']['bookable'] is False
+    assert x['updateOutbox']['state']=='PENDING' and x['updateOutbox']['payload']['verification_state']=='EXPIRED'
+    assert x['staleLease']==0
+    assert x['old']['state']=='EXPIRED' and x['oldQueue']==0
+    assert x['oldLife']['reason']=='BOOKING_DEADLINE_PASSED'
