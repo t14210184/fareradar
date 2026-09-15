@@ -2,6 +2,7 @@ import type { D1Database } from "./types.js";
 import { promotionFingerprint, extractPromotionText } from "./source.js";
 import { claimDomainEvents, ackDomainEvent } from "./outbox.js";
 import { enqueueCandidateSignal } from "./priority.js";
+import { attributeConfirmedCandidate } from "./attribution.js";
 
 function validSha(x:string){return /^[a-f0-9]{64}$/i.test(x)}
 export async function ingestSourceObservation(db:D1Database,input:{observation_id:string;source_id:string;observed_at:string;canonical_url:string;content_sha256:string;parser_version?:string|null;privacy_class:"PUBLIC"|"PARTNER_STRUCTURED"|"PRIVATE_NOTIFICATION";extraction_type?:"PROMOTION_SIGNAL"|"ROUTE_UNIVERSE";structured_payload?:unknown},nowIso:string){
@@ -52,6 +53,8 @@ export async function projectDomainEvents(db:D1Database,nowIso:string,workerId="
         if(!a)throw new Error("AGENCY_OFFER_MISSING");
         const priority=(a.seller_verification_state==="VERIFIED"||a.state==="SELLER_CONFIRMED"||a.state==="CHECKOUT_REPRODUCED")?90:75;
         await enqueueCandidateSignal(db,{signal_type:"AGENCY_CLEARANCE",signal_id:a.agency_offer_id,required_verification:"SELLER_RECHECK",priority_score:priority,route_scope:[`${a.origin}-${a.destination}`],price_claim:[{currency:a.currency,amount:a.price}],source_evidence_id:a.source_evidence_id,observed_at:a.observed_at},nowIso);
+      } else if(e.event_type==="CONFIRMED_CANDIDATE"){
+        const payload=JSON.parse(e.payload_json); await attributeConfirmedCandidate(db,{itinerary_id:payload.itinerary_id,evidence_ids:payload.evidence_ids??[]},nowIso);
       }
       await ackDomainEvent(db,{id:Number(e.id),ok:true},nowIso);done++;
     }catch(err){await ackDomainEvent(db,{id:Number((e as any).id),ok:false,error:err instanceof Error?err.message:String(err)},nowIso)}
