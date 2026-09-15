@@ -33,7 +33,7 @@ jobs:
           mkdir -p /tmp/verify
           git -C /tmp/verify init -q
           git -C /tmp/verify bundle verify /tmp/source.bundle
-          git clone -q /tmp/source.bundle /tmp/source
+          git clone -q -b reconstruct-v1.3 /tmp/source.bundle /tmp/source
           test "$(git -C /tmp/source rev-parse HEAD)" = "$EXPECTED_HEAD"
           test -z "$(git -C /tmp/source status --porcelain)"
       - name: Verify target prestate and publish exact history
