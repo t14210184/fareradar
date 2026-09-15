@@ -18,6 +18,7 @@ import { ingestFxSnapshot, ingestCostEvidenceSnapshot, upsertMandatoryCostEviden
 import { upsertFourLegCycle, transitionFourLegCycle, fourLegLiabilitySummary } from "./four_leg.js";
 import { ingestCarrierTicketingPolicy, evaluateTicketingGuards } from "./ticketing_guard.js";
 import { ingestConnectionBufferPolicy, ingestAirportChangePolicy, evaluateTransferBoundary } from "./transfer_runtime.js";
+import { evaluateActionableFromDb } from "./readiness_runtime.js";
 
 export interface Env { DB:D1Database; INGEST_HMAC_SECRET:string; }
 const enc=new TextEncoder();
@@ -73,7 +74,15 @@ const worker={
     }
     if(req.method==="POST"&&u.pathname==="/candidate/evaluate"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
-      try{const p=JSON.parse(body) as {intent_id:string;itinerary_id:string;alert_class:"DEAL"|"ADMIN";payload:unknown;actionable?:boolean;provisional_trigger?:boolean}; if(!p.actionable&&!p.provisional_trigger)return json({ok:true,queued:false},200); await enqueueAlertIntent(env.DB,p,new Date().toISOString()); return json({ok:true,queued:true},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+      try{
+        const p=JSON.parse(body) as {intent_id:string;itinerary_id:string;alert_class?:"DEAL"|"ADMIN";payload:unknown;actionable?:boolean;provisional_trigger?:boolean};
+        if(Object.prototype.hasOwnProperty.call(p,"actionable"))throw new Error("CLIENT_ACTIONABLE_FORBIDDEN");
+        if((p.alert_class??"DEAL")!=="DEAL")throw new Error("CANDIDATE_ALERT_CLASS_INVALID");
+        const now=new Date().toISOString(); const readiness=await evaluateActionableFromDb(env.DB,p.itinerary_id,now);
+        if(!readiness.actionable&&!p.provisional_trigger)return json({ok:true,queued:false,...readiness},200);
+        await enqueueAlertIntent(env.DB,{intent_id:p.intent_id,itinerary_id:p.itinerary_id,alert_class:"DEAL",payload:p.payload},now);
+        return json({ok:true,queued:true,provisional:!readiness.actionable,...readiness},202);
+      }catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/notifications/lease"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {worker_id:string;limit?:number}; return json({jobs:await leaseNotifications(env.DB,new Date().toISOString(),p.worker_id,Math.min(p.limit??10,10))});
