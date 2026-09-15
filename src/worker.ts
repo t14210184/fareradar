@@ -75,14 +75,15 @@ const worker={
       try{
         const p=JSON.parse(body) as {itinerary_id:string;provisional_trigger?:boolean;actionable?:boolean;payload?:unknown;intent_id?:string;alert_class?:"DEAL"|"ADMIN"};
         if(Object.prototype.hasOwnProperty.call(p,"actionable"))throw new Error("CLIENT_ACTIONABLE_FORBIDDEN");
+        if(Object.prototype.hasOwnProperty.call(p,"provisional_trigger"))throw new Error("CLIENT_PROVISIONAL_TRIGGER_FORBIDDEN");
         if(Object.prototype.hasOwnProperty.call(p,"payload")||Object.prototype.hasOwnProperty.call(p,"intent_id"))throw new Error("CLIENT_ALERT_CONTENT_FORBIDDEN");
         if((p.alert_class??"DEAL")!=="DEAL")throw new Error("CANDIDATE_ALERT_CLASS_INVALID");
         const now=new Date().toISOString(); const readiness=await evaluateActionableFromDb(env.DB,p.itinerary_id,now);
-        if(!readiness.actionable&&!p.provisional_trigger)return json({ok:true,queued:false,...readiness},200);
-        const provisional=!readiness.actionable; const payload=await buildCanonicalCandidateAlert(env.DB,p.itinerary_id,now,provisional);
-        const intentId=`${provisional?"provisional":"deal"}:${p.itinerary_id}:${payload.updated_at}`;
+        if(!readiness.actionable)return json({ok:true,queued:false,...readiness},200);
+        const payload=await buildCanonicalCandidateAlert(env.DB,p.itinerary_id,now,false);
+        const intentId=`deal:${p.itinerary_id}:${payload.updated_at}`;
         await enqueueAlertIntent(env.DB,{intent_id:intentId,itinerary_id:p.itinerary_id,alert_class:"DEAL",payload},now);
-        return json({ok:true,queued:true,provisional,intent_id:intentId,...readiness},202);
+        return json({ok:true,queued:true,provisional:false,intent_id:intentId,...readiness},202);
       }catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/notifications/lease"){
