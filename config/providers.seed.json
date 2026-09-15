@@ -6,7 +6,13 @@
     "rate_policy": "TARGETED_ONLY",
     "look_to_book_budget": 1500,
     "kill_switch_state": "CLEAR",
-    "owner": "provider"
+    "owner": "provider",
+    "connector_state": "UNIMPLEMENTED",
+    "supported_verification": [
+      "LIVE_REPRICE"
+    ],
+    "credential_binding": "DUFFEL_ACCESS_TOKEN",
+    "background_allowed": false
   },
   {
     "provider_id": "amadeus_self_service",
@@ -15,6 +21,12 @@
     "rate_policy": "NON_LCC_TARGETED_ONLY",
     "look_to_book_budget": null,
     "kill_switch_state": "CLEAR",
-    "owner": "provider"
+    "owner": "provider",
+    "connector_state": "UNIMPLEMENTED",
+    "supported_verification": [
+      "LIVE_REPRICE_NON_LCC"
+    ],
+    "credential_binding": "AMADEUS_CLIENT_SECRET",
+    "background_allowed": false
   }
 ]

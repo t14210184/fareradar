@@ -13,8 +13,9 @@ def main():
         vals=[r.get(c) for c in cols]
         out.append(f"INSERT INTO source_registry({','.join(cols)}) VALUES({','.join(q(v) for v in vals)}) ON CONFLICT(source_id) DO UPDATE SET lifecycle_state=excluded.lifecycle_state,terms_snapshot_at=excluded.terms_snapshot_at,min_interval_ms=excluded.min_interval_ms,kill_switch=excluded.kill_switch;")
     for r in json.loads((ROOT/'config/providers.seed.json').read_text()):
-        cols=['provider_id','access_basis','terms_snapshot_at','rate_policy','look_to_book_budget','kill_switch_state','owner']; vals=[r.get(c) for c in cols]
-        out.append(f"INSERT INTO provider_access_registry({','.join(cols)}) VALUES({','.join(q(v) for v in vals)}) ON CONFLICT(provider_id) DO UPDATE SET terms_snapshot_at=excluded.terms_snapshot_at,rate_policy=excluded.rate_policy,kill_switch_state=excluded.kill_switch_state;")
+        rr=dict(r); rr['supported_verification_json']=json.dumps(r.get('supported_verification',[]),separators=(',',':'))
+        cols=['provider_id','access_basis','terms_snapshot_at','rate_policy','look_to_book_budget','kill_switch_state','owner','connector_state','supported_verification_json','credential_binding','background_allowed']; vals=[rr.get(c) for c in cols]
+        out.append(f"INSERT INTO provider_access_registry({','.join(cols)}) VALUES({','.join(q(v) for v in vals)}) ON CONFLICT(provider_id) DO UPDATE SET terms_snapshot_at=excluded.terms_snapshot_at,rate_policy=excluded.rate_policy,kill_switch_state=excluded.kill_switch_state,connector_state=excluded.connector_state,supported_verification_json=excluded.supported_verification_json,credential_binding=excluded.credential_binding,background_allowed=excluded.background_allowed;")
     out.append('COMMIT;')
     p=ROOT/'generated/seed.generated.sql'; p.write_text('\n'.join(out)+'\n'); print(p)
 if __name__=='__main__':main()

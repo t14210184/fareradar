@@ -33,14 +33,14 @@ export async function enqueueCandidateSignal(db:D1Database,input:{
   return {queue_id:queueId};
 }
 
-export async function leaseCandidateSignals(db:D1Database,nowIso:string,workerId:string,limit=5,leaseSeconds=90){
+export async function leaseCandidateSignals(db:D1Database,nowIso:string,workerId:string,limit=5,leaseSeconds=90,verificationType?:"LIVE_REPRICE"|"SELLER_RECHECK"){
   await db.prepare("UPDATE candidate_priority_queue SET state='PENDING',claimed_by=NULL,lease_until=NULL WHERE state='LEASED' AND lease_until IS NOT NULL AND lease_until<=?").bind(nowIso).run();
   const until=after(nowIso,leaseSeconds);
   return (await db.prepare(`UPDATE candidate_priority_queue SET state='LEASED',claimed_by=?,lease_until=?,attempts=attempts+1
-    WHERE queue_id IN (SELECT queue_id FROM candidate_priority_queue WHERE state='PENDING' AND available_at<=? ORDER BY priority_score DESC,first_observed_at ASC LIMIT ?)
+    WHERE queue_id IN (SELECT queue_id FROM candidate_priority_queue WHERE state='PENDING' AND available_at<=? AND (? IS NULL OR required_verification=?) ORDER BY priority_score DESC,first_observed_at ASC LIMIT ?)
     AND state='PENDING'
     RETURNING queue_id,signal_type,signal_id,required_verification,priority_score,route_scope_json,price_claim_json,source_evidence_id,attempts,lease_until`)
-    .bind(workerId,until,nowIso,limit).all()).results;
+    .bind(workerId,until,nowIso,verificationType??null,verificationType??null,limit).all()).results;
 }
 
 export async function ackCandidateSignal(db:D1Database,input:{queue_id:string;ok:boolean;retryable?:boolean;error?:string|null},nowIso:string){
