@@ -2,7 +2,7 @@ import type { CandidatePlanInput, D1Database, D1PreparedStatement } from "./type
 import { REQUIRED_FACETS } from "./types.js";
 import { validateScenarioCost } from "./core.js";
 
-const MAX_BATCH_STATEMENTS = 48;
+const MAX_BATCH_STATEMENTS = 46;
 const MAX_TICKETS = 8, MAX_TRANSFERS = 8, MAX_COSTS = 16, MAX_DOCUMENTS = 8, MAX_LIABILITIES = 8;
 
 function assert(cond:boolean, msg:string): asserts cond { if (!cond) throw new Error(msg); }
