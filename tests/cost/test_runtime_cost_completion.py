@@ -6,3 +6,6 @@ def test_direct_all_in_cost_requires_ground_fresh_fx_and_profile_seat_cost():
     assert x['stale']['cost_complete'] is False and x['stale']['reason'] in ('CHECKOUT_PRICE_STALE','FX_STALE','BAGGAGE_COST_OR_ALLOWANCE_INCOMPLETE')
     assert x['seatMissing']=={'cost_complete':False,'reason':'SEAT_SELECTION_COST_REQUIRED'}
     assert x['seatComplete']['cost_complete'] is True and x['seatComplete']['cash_trip_cost_twd']==5700
+    assert x['missingError']=='COST_EVIDENCE_NOT_FOUND'
+    assert x['mismatchError']=='COST_EVIDENCE_VALUE_MISMATCH'
+    assert x['conflictError']=='COST_EVIDENCE_ID_CONFLICT'

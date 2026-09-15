@@ -1,16 +1,68 @@
-import { DatabaseSync } from 'node:sqlite'; import fs from 'node:fs';
-import { upsertRuntimeProfile } from '../dist/profile.js'; import { ingestFxSnapshot, upsertMandatoryCostEvidence, recomputeDirectAllInCost } from '../dist/cost_runtime.js';
-class Stmt { constructor(s){this.s=s;this.args=[]} bind(...v){this.args=v;return this} async run(){return {success:true,meta:this.s.run(...this.args)}} async first(){return this.s.get(...this.args)??null} async all(){return {results:this.s.all(...this.args)}} }
-class DB { constructor(db){this.db=db} prepare(sql){return new Stmt(this.db.prepare(sql))} async batch(stmts){this.db.exec('BEGIN IMMEDIATE');try{const o=[];for(const s of stmts)o.push(await s.run());this.db.exec('COMMIT');return o}catch(e){this.db.exec('ROLLBACK');throw e}} }
-const raw=new DatabaseSync(':memory:');for(const f of fs.readdirSync(new URL('../migrations/',import.meta.url)).filter(x=>x.endsWith('.sql')).sort())raw.exec(fs.readFileSync(new URL(`../migrations/${f}`,import.meta.url),'utf8'));raw.exec(fs.readFileSync(new URL('../generated/seed.generated.sql',import.meta.url),'utf8'));const db=new DB(raw);
+import { DatabaseSync } from 'node:sqlite';
+import fs from 'node:fs';
+import { upsertRuntimeProfile } from '../dist/profile.js';
+import { ingestFxSnapshot, ingestCostEvidenceSnapshot, upsertMandatoryCostEvidence, recomputeDirectAllInCost } from '../dist/cost_runtime.js';
+
+class Stmt {
+  constructor(s){ this.s=s; this.args=[]; }
+  bind(...v){ this.args=v; return this; }
+  async run(){ return {success:true,meta:this.s.run(...this.args)}; }
+  async first(){ return this.s.get(...this.args)??null; }
+  async all(){ return {results:this.s.all(...this.args)}; }
+}
+class DB {
+  constructor(db){ this.db=db; }
+  prepare(sql){ return new Stmt(this.db.prepare(sql)); }
+  async batch(stmts){ this.db.exec('BEGIN IMMEDIATE'); try{ const o=[]; for(const s of stmts)o.push(await s.run()); this.db.exec('COMMIT'); return o; } catch(e){ this.db.exec('ROLLBACK'); throw e; } }
+}
+
+const raw=new DatabaseSync(':memory:');
+for(const f of fs.readdirSync(new URL('../migrations/',import.meta.url)).filter(x=>x.endsWith('.sql')).sort()) raw.exec(fs.readFileSync(new URL(`../migrations/${f}`,import.meta.url),'utf8'));
+raw.exec(fs.readFileSync(new URL('../generated/seed.generated.sql',import.meta.url),'utf8'));
+const db=new DB(raw);
 raw.prepare("update provider_access_registry set terms_snapshot_at='2026-09-15T00:00:00Z' where provider_id='duffel'").run();
-async function profile(id,seat){await upsertRuntimeProfile(db,{profile_id:id,home_city:'Synthetic',home_airports:['TPE'],checked_bag_pattern:'NONE',baggage_kg:0,seat_required:seat,red_eye_ok:true,self_transfer_ok:true,overnight_transfer_ok:false,airport_change_ok:false,mainland_permit_status:'UNKNOWN',korea_entry_profile:'CHECK_AT_QUERY_TIME',foreign_origin_ok:true,positioning_cost_attribution:'FULL',max_positioning_cost_twd:2500,value_of_time_twd_per_hour:300,min_savings_for_self_transfer_twd:2500,currency:'TWD'},'2026-09-15T00:00:00Z')}
-async function base(itin,pid,quote='q-'+itin){await profile(pid,false);raw.prepare("insert into offer_snapshots(provider_offer_id,query_fingerprint,provider,currency,observed_at,expires_at,raw_sha256,offer_total,fare_freshness,cached_or_live) values(?,?,'duffel','TWD','2026-09-15T00:00:00Z','2026-09-15T01:00:00Z',?,5000,'REFRESHED_LIVE','LIVE')").run('off-'+itin,'fp-'+itin,'a'.repeat(64));raw.prepare("insert into runtime_payment_profiles(payment_profile_id,provider_id,payment_method_class,credential_binding,enabled,expires_at,created_at,updated_at) values(?, 'duffel','CARD','DUFFEL_PAYMENT_CARD_ID',1,'2026-09-15T00:30:00Z','2026-09-15T00:00:00Z','2026-09-15T00:00:00Z')").run('pay-'+itin);raw.prepare("insert into provider_pricing_quotes(quote_id,provider_offer_id,provider_id,payment_profile_id,selected_services_json,payment_method_class,currency,fare_and_services_total,surcharge_total,grand_total,priced_at,expires_at,raw_sha256,price_scope) values(?,?,'duffel',?,'[]','CARD','TWD',5000,100,5100,'2026-09-15T00:01:00Z','2026-09-15T00:20:00Z',?,'CHECKOUT_TOTAL_WITH_SELECTED_SERVICES_AND_PAYMENT_SURCHARGE')").run(quote,'off-'+itin,'pay-'+itin,'b'.repeat(64));raw.prepare("insert into itinerary_candidates(itinerary_id,profile_id,strategy_type,cash_trip_cost_twd,cost_complete,risk_class,verification_state,updated_at) values(?,?,'S00_DIRECT_RT',NULL,0,'LOW','CONFIRMED','2026-09-15T00:00:00Z')").run(itin,pid);raw.prepare("insert into cost_components(cost_id,itinerary_id,type,amount,currency,twd_amount,inclusion_state,source_offer_id,dedupe_key,certainty,paid_state,refundable,pricing_quote_id,observed_at,evidence_expires_at) values(?,?, 'CHECKOUT_TOTAL',5100,'TWD',5100,'INCLUDED_IN_OFFER',?,'offer-total','CHECKOUT_REPRICE','UNPAID',0,?,'2026-09-15T00:01:00Z','2026-09-15T00:20:00Z')").run('base-'+itin,itin,'off-'+itin,quote);raw.prepare("insert into readiness_facets(itinerary_id,facet_type,status,reason_code,observed_at,expires_at,authority,evidence_id) values(?,'BAGGAGE_FEASIBLE','PASS','NO_CHECKED_BAG_REQUIRED','2026-09-15T00:01:00Z','2026-09-15T00:20:00Z','SYSTEM','bag')").run(itin);}
+
+async function profile(id,seat){
+  await upsertRuntimeProfile(db,{profile_id:id,home_city:'Synthetic',home_airports:['TPE'],checked_bag_pattern:'NONE',baggage_kg:0,seat_required:seat,red_eye_ok:true,self_transfer_ok:true,overnight_transfer_ok:false,airport_change_ok:false,mainland_permit_status:'UNKNOWN',korea_entry_profile:'CHECK_AT_QUERY_TIME',foreign_origin_ok:true,positioning_cost_attribution:'FULL',max_positioning_cost_twd:2500,value_of_time_twd_per_hour:300,min_savings_for_self_transfer_twd:2500,currency:'TWD'},'2026-09-15T00:00:00Z');
+}
+async function evidence(id,type,amount,currency,expiry='2026-09-15T00:25:00Z'){
+  return ingestCostEvidenceSnapshot(db,{evidence_id:id,evidence_type:type,subject_key:id,amount,currency,authority:'SYNTHETIC_TEST',access_basis:'PRIVATE_RUNTIME',observed_at:'2026-09-15T00:02:00Z',expires_at:expiry,raw_sha256:'d'.repeat(64),privacy_class:'PRIVATE_MINIMAL',payload:{synthetic:true}},'2026-09-15T00:02:00Z');
+}
+async function base(itin,pid,quote='q-'+itin){
+  await profile(pid,false);
+  raw.prepare("insert into offer_snapshots(provider_offer_id,query_fingerprint,provider,currency,observed_at,expires_at,raw_sha256,offer_total,fare_freshness,cached_or_live) values(?,?,'duffel','TWD','2026-09-15T00:00:00Z','2026-09-15T01:00:00Z',?,5000,'REFRESHED_LIVE','LIVE')").run('off-'+itin,'fp-'+itin,'a'.repeat(64));
+  raw.prepare("insert into runtime_payment_profiles(payment_profile_id,provider_id,payment_method_class,credential_binding,enabled,expires_at,created_at,updated_at) values(?, 'duffel','CARD','DUFFEL_PAYMENT_CARD_ID',1,'2026-09-15T00:30:00Z','2026-09-15T00:00:00Z','2026-09-15T00:00:00Z')").run('pay-'+itin);
+  raw.prepare("insert into provider_pricing_quotes(quote_id,provider_offer_id,provider_id,payment_profile_id,selected_services_json,payment_method_class,currency,fare_and_services_total,surcharge_total,grand_total,priced_at,expires_at,raw_sha256,price_scope) values(?,?,'duffel',?,'[]','CARD','TWD',5000,100,5100,'2026-09-15T00:01:00Z','2026-09-15T00:20:00Z',?,'CHECKOUT_TOTAL_WITH_SELECTED_SERVICES_AND_PAYMENT_SURCHARGE')").run(quote,'off-'+itin,'pay-'+itin,'b'.repeat(64));
+  raw.prepare("insert into itinerary_candidates(itinerary_id,profile_id,strategy_type,cash_trip_cost_twd,cost_complete,risk_class,verification_state,updated_at) values(?,?,'S00_DIRECT_RT',NULL,0,'LOW','CONFIRMED','2026-09-15T00:00:00Z')").run(itin,pid);
+  raw.prepare("insert into cost_components(cost_id,itinerary_id,type,amount,currency,twd_amount,inclusion_state,source_offer_id,dedupe_key,certainty,paid_state,refundable,pricing_quote_id,observed_at,evidence_expires_at) values(?,?, 'CHECKOUT_TOTAL',5100,'TWD',5100,'INCLUDED_IN_OFFER',?,'offer-total','CHECKOUT_REPRICE','UNPAID',0,?,'2026-09-15T00:01:00Z','2026-09-15T00:20:00Z')").run('base-'+itin,itin,'off-'+itin,quote);
+  raw.prepare("insert into readiness_facets(itinerary_id,facet_type,status,reason_code,observed_at,expires_at,authority,evidence_id) values(?,'BAGGAGE_FEASIBLE','PASS','NO_CHECKED_BAG_REQUIRED','2026-09-15T00:01:00Z','2026-09-15T00:20:00Z','SYSTEM','bag')").run(itin);
+}
+
 await base('i1','p1');
 await ingestFxSnapshot(db,{fx_snapshot_id:'fx-jpy',base_currency:'JPY',quote_currency:'TWD',rate:0.22,rate_source:'TEST',rate_observed_at:'2026-09-15T00:00:00Z',provider_spread:0,card_fx_fee:0,settlement_currency:'TWD',expires_at:'2026-09-15T00:30:00Z',raw_sha256:'c'.repeat(64)});
+await evidence('ground:o','GROUND_ORIGIN',100,'TWD');
+await evidence('ground:d','GROUND_DESTINATION',1200,'JPY');
 await upsertMandatoryCostEvidence(db,{cost_id:'g1o',itinerary_id:'i1',type:'GROUND_ORIGIN',amount:100,currency:'TWD',dedupe_key:'ground-origin',source_evidence_id:'ground:o',certainty:'CONFIRMED',observed_at:'2026-09-15T00:02:00Z',evidence_expires_at:'2026-09-15T00:25:00Z'},'2026-09-15T00:02:00Z');
 await upsertMandatoryCostEvidence(db,{cost_id:'g1d',itinerary_id:'i1',type:'GROUND_DESTINATION',amount:1200,currency:'JPY',dedupe_key:'ground-destination',source_evidence_id:'ground:d',certainty:'CONFIRMED',observed_at:'2026-09-15T00:02:00Z',evidence_expires_at:'2026-09-15T00:25:00Z',fx_snapshot_id:'fx-jpy'},'2026-09-15T00:02:00Z');
 const complete=await recomputeDirectAllInCost(db,'i1','2026-09-15T00:03:00Z');
 const stale=await recomputeDirectAllInCost(db,'i1','2026-09-15T00:31:00Z');
-await base('i2','p2','q-i2');raw.prepare("update runtime_profiles set seat_required=1 where profile_id='p2'").run();await upsertMandatoryCostEvidence(db,{cost_id:'g2o',itinerary_id:'i2',type:'GROUND_ORIGIN',amount:100,currency:'TWD',dedupe_key:'ground-origin',source_evidence_id:'ground:o2',certainty:'CONFIRMED',observed_at:'2026-09-15T00:02:00Z',evidence_expires_at:'2026-09-15T00:25:00Z'},'2026-09-15T00:02:00Z');await upsertMandatoryCostEvidence(db,{cost_id:'g2d',itinerary_id:'i2',type:'GROUND_DESTINATION',amount:200,currency:'TWD',dedupe_key:'ground-destination',source_evidence_id:'ground:d2',certainty:'CONFIRMED',observed_at:'2026-09-15T00:02:00Z',evidence_expires_at:'2026-09-15T00:25:00Z'},'2026-09-15T00:02:00Z');const seatMissing=await recomputeDirectAllInCost(db,'i2','2026-09-15T00:03:00Z');await upsertMandatoryCostEvidence(db,{cost_id:'seat2',itinerary_id:'i2',type:'SEAT_SELECTION',amount:300,currency:'TWD',dedupe_key:'seat-selection',source_evidence_id:'seat:2',certainty:'CONFIRMED',observed_at:'2026-09-15T00:02:00Z',evidence_expires_at:'2026-09-15T00:25:00Z'},'2026-09-15T00:02:00Z');const seatComplete=await recomputeDirectAllInCost(db,'i2','2026-09-15T00:03:01Z');
-console.log(JSON.stringify({complete,stale,seatMissing,seatComplete,i1:raw.prepare("select cash_trip_cost_twd,cost_complete from itinerary_candidates where itinerary_id='i1'").get(),i2:raw.prepare("select cash_trip_cost_twd,cost_complete from itinerary_candidates where itinerary_id='i2'").get()}));
+
+await base('i2','p2','q-i2');
+raw.prepare("update runtime_profiles set seat_required=1 where profile_id='p2'").run();
+await evidence('ground:o2','GROUND_ORIGIN',100,'TWD');
+await evidence('ground:d2','GROUND_DESTINATION',200,'TWD');
+await evidence('seat:2','SEAT_SELECTION',300,'TWD');
+await upsertMandatoryCostEvidence(db,{cost_id:'g2o',itinerary_id:'i2',type:'GROUND_ORIGIN',amount:100,currency:'TWD',dedupe_key:'ground-origin',source_evidence_id:'ground:o2',certainty:'CONFIRMED',observed_at:'2026-09-15T00:02:00Z',evidence_expires_at:'2026-09-15T00:25:00Z'},'2026-09-15T00:02:00Z');
+await upsertMandatoryCostEvidence(db,{cost_id:'g2d',itinerary_id:'i2',type:'GROUND_DESTINATION',amount:200,currency:'TWD',dedupe_key:'ground-destination',source_evidence_id:'ground:d2',certainty:'CONFIRMED',observed_at:'2026-09-15T00:02:00Z',evidence_expires_at:'2026-09-15T00:25:00Z'},'2026-09-15T00:02:00Z');
+const seatMissing=await recomputeDirectAllInCost(db,'i2','2026-09-15T00:03:00Z');
+await upsertMandatoryCostEvidence(db,{cost_id:'seat2',itinerary_id:'i2',type:'SEAT_SELECTION',amount:300,currency:'TWD',dedupe_key:'seat-selection',source_evidence_id:'seat:2',certainty:'CONFIRMED',observed_at:'2026-09-15T00:02:00Z',evidence_expires_at:'2026-09-15T00:25:00Z'},'2026-09-15T00:02:00Z');
+const seatComplete=await recomputeDirectAllInCost(db,'i2','2026-09-15T00:03:01Z');
+
+let missingError='';
+try{ await upsertMandatoryCostEvidence(db,{cost_id:'bad-missing',itinerary_id:'i2',type:'SEAT_SELECTION',amount:1,currency:'TWD',dedupe_key:'bad-missing',source_evidence_id:'missing',certainty:'CONFIRMED',observed_at:'2026-09-15T00:02:00Z',evidence_expires_at:'2026-09-15T00:25:00Z'},'2026-09-15T00:02:00Z'); }catch(e){ missingError=e.message; }
+let mismatchError='';
+try{ await upsertMandatoryCostEvidence(db,{cost_id:'bad-mismatch',itinerary_id:'i2',type:'SEAT_SELECTION',amount:999,currency:'TWD',dedupe_key:'bad-mismatch',source_evidence_id:'seat:2',certainty:'CONFIRMED',observed_at:'2026-09-15T00:02:00Z',evidence_expires_at:'2026-09-15T00:25:00Z'},'2026-09-15T00:02:00Z'); }catch(e){ mismatchError=e.message; }
+let conflictError='';
+try{ await ingestCostEvidenceSnapshot(db,{evidence_id:'seat:2',evidence_type:'SEAT_SELECTION',subject_key:'seat:2',amount:301,currency:'TWD',authority:'SYNTHETIC_TEST',access_basis:'PRIVATE_RUNTIME',observed_at:'2026-09-15T00:02:00Z',expires_at:'2026-09-15T00:25:00Z',raw_sha256:'d'.repeat(64),privacy_class:'PRIVATE_MINIMAL',payload:{synthetic:true}},'2026-09-15T00:02:00Z'); }catch(e){ conflictError=e.message; }
+
+console.log(JSON.stringify({complete,stale,seatMissing,seatComplete,missingError,mismatchError,conflictError,i1:raw.prepare("select cash_trip_cost_twd,cost_complete from itinerary_candidates where itinerary_id='i1'").get(),i2:raw.prepare("select cash_trip_cost_twd,cost_complete from itinerary_candidates where itinerary_id='i2'").get()}));
