@@ -7,7 +7,7 @@ required={
 'itinerary_candidates':{'itinerary_id','profile_id','strategy_type','verification_state'},
 'offer_snapshots':{'provider_offer_id','query_fingerprint','provider','raw_sha256','offer_total','fare_freshness','cached_or_live','offer_structure_json'},
 'ticket_components':{'ticket_id','pnr_group','connection_protection_type'},
-'transfer_boundaries':{'from_ticket_id','to_ticket_id','scheduled_buffer_minutes','required_buffer_minutes','evidence_id'},
+'transfer_boundaries':{'from_ticket_id','to_ticket_id','scheduled_buffer_minutes','required_buffer_minutes','evidence_id','evaluation_status','evaluation_reason','evaluated_at','evaluation_expires_at'},
 'cost_components':{'inclusion_state','source_offer_id','policy_evidence_id','source_evidence_id','pricing_quote_id','dedupe_key','paid_state','refundable','evidence_expires_at'},
 'readiness_facets':{'facet_type','status','expires_at','authority','evidence_id'},
 'document_requirements':{'jurisdiction','travel_event','traveler_document_class','valid_for_event_at','authority_source','source_snapshot_id'},
@@ -35,7 +35,8 @@ required={
 'cost_evidence_snapshots':{'evidence_id','evidence_type','subject_key','amount','currency','source_id','source_observation_id','canonical_url','authority','access_basis','effective_event_at','observed_at','expires_at','raw_sha256','privacy_class','payload_json'},
 'cost_coverage_assertions':{'itinerary_id','category','status','evidence_id','evidence_kind','authority','observed_at','expires_at','details_json'},
 'four_leg_cycles':{'cycle_id','itinerary_id','state','broken_reason','created_at','updated_at'},
-'carrier_ticketing_policies':{'policy_id','carrier','policy_type','consequence','terms_url','article_or_clause','observed_at','expires_at','source_snapshot_hash','status'} }
+'carrier_ticketing_policies':{'policy_id','carrier','policy_type','consequence','terms_url','article_or_clause','observed_at','expires_at','source_snapshot_hash','status'},
+'connection_buffer_policies':{'policy_id','airport','airport_base_buffer','immigration_margin','baggage_reclaim_margin','terminal_transfer_margin','checkin_cutoff_margin','security_margin','delay_margin','buffer_confidence','authority','observed_at','expires_at','raw_sha256'} }
 for table, cols in required.items():
     got={r[1] for r in db.execute(f'pragma table_info({table})')}
     missing=cols-got
