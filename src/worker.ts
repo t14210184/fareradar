@@ -16,6 +16,7 @@ import { upsertRuntimeProfile } from "./profile.js";
 import { upsertPaymentProfile, enqueueCheckoutReprice, ingestPricingQuote } from "./checkout_pricing.js";
 import { ingestFxSnapshot, ingestCostEvidenceSnapshot, upsertMandatoryCostEvidence, upsertCostCoverageAssertion, attachFxToCost, recomputeDirectAllInCost } from "./cost_runtime.js";
 import { upsertFourLegCycle, transitionFourLegCycle, fourLegLiabilitySummary } from "./four_leg.js";
+import { ingestCarrierTicketingPolicy, evaluateTicketingGuards } from "./ticketing_guard.js";
 
 export interface Env { DB:D1Database; INGEST_HMAC_SECRET:string; }
 const enc=new TextEncoder();
@@ -160,6 +161,14 @@ const worker={
     if(req.method==="POST"&&u.pathname==="/four-leg/cycles/summary"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
       try{const p=JSON.parse(body);return json({ok:true,...await fourLegLiabilitySummary(env.DB,p.cycle_id)},200);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/ticketing-policies/ingest"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await ingestCarrierTicketingPolicy(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==="TICKETING_POLICY_IMMUTABLE_CONFLICT"?409:400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/ticketing/evaluate"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{const p=JSON.parse(body);return json({ok:true,...await evaluateTicketingGuards(env.DB,p.itinerary_id,new Date().toISOString())},200);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/provider-jobs/lease"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
