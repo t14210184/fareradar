@@ -23,6 +23,13 @@ export function validateCandidatePlan(p:CandidatePlanInput){
   for (const t of p.tickets){ nonempty(t.ticket_id,"TICKET_ID"); nonempty(t.pnr_group,"PNR_GROUP"); assert(Array.isArray(t.segments) && t.segments.length > 0,"SEGMENTS_REQUIRED"); }
   for (const tr of p.transfers){ assert(ticketIds.has(tr.from_ticket_id) && ticketIds.has(tr.to_ticket_id),"TRANSFER_TICKET_UNKNOWN"); finite(tr.scheduled_buffer_minutes,"SCHEDULED_BUFFER"); finite(tr.required_buffer_minutes,"REQUIRED_BUFFER"); }
   const dedupe = new Set<string>(); for (const c of p.costs){ nonempty(c.cost_id,"COST_ID"); finite(c.amount,"COST_AMOUNT"); assert(!dedupe.has(c.dedupe_key),"COST_DEDUPE_DUPLICATE"); dedupe.add(c.dedupe_key); assert(!!c.source_offer_id || !!c.policy_evidence_id || !!c.source_evidence_id,"COST_EVIDENCE_REQUIRED"); }
+  if(p.itinerary.cost_complete){
+    const overnightCount=p.transfers.filter(x=>!!x.overnight_transfer).length;
+    const airportChangeCount=p.transfers.filter(x=>x.airport_change).length;
+    const completeCost=(type:string)=>p.costs.filter(c=>c.type===type&&c.inclusion_state!=="UNKNOWN"&&c.twd_amount!==null).length;
+    assert(completeCost("MANDATORY_HOTEL")>=overnightCount,"OVERNIGHT_HOTEL_COST_REQUIRED");
+    assert(completeCost("AIRPORT_CHANGE_GROUND")>=airportChangeCount,"AIRPORT_CHANGE_GROUND_COST_REQUIRED");
+  }
   for (const l of p.four_leg_liabilities){ finite(l.amount,"LIABILITY_AMOUNT"); finite(l.remaining_exposure,"REMAINING_EXPOSURE"); finite(l.recoverable_amount,"RECOVERABLE_AMOUNT"); assert(l.remaining_exposure >= 0 && l.recoverable_amount >= 0,"LIABILITY_NEGATIVE"); }
   return true;
 }
