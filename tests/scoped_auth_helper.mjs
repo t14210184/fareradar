@@ -1,9 +1,9 @@
 let nonceSeq=0;
 const enc=new TextEncoder();
 function hex(buf){return [...new Uint8Array(buf)].map(x=>x.toString(16).padStart(2,'0')).join('');}
-export function installKey(raw,{keyId='test-key',role='TEST',sourceId=null,agencyId=null,secretSlot='test-slot',allowedPaths=['/'],enabled=1,notBefore=null,expiresAt='2099-01-01T00:00:00Z'}={}){
-  raw.prepare("insert into ingest_auth_keys(key_id,role,source_id,agency_id,secret_slot,allowed_paths_json,enabled,not_before,expires_at,created_at) values(?,?,?,?,?,?,?,?,?,?)")
-    .run(keyId,role,sourceId,agencyId,secretSlot,JSON.stringify(allowedPaths),enabled,notBefore,expiresAt,'2026-09-15T00:00:00Z');
+export function installKey(raw,{keyId='test-key',role='TEST',sourceId=null,agencyId=null,providerId=null,secretSlot='test-slot',allowedPaths=['/'],enabled=1,notBefore=null,expiresAt='2099-01-01T00:00:00Z'}={}){
+  raw.prepare("insert into ingest_auth_keys(key_id,role,source_id,agency_id,provider_id,secret_slot,allowed_paths_json,enabled,not_before,expires_at,created_at) values(?,?,?,?,?,?,?,?,?,?,?)")
+    .run(keyId,role,sourceId,agencyId,providerId,secretSlot,JSON.stringify(allowedPaths),enabled,notBefore,expiresAt,'2026-09-15T00:00:00Z');
   return {keyId,secretSlot};
 }
 export function authEnv(db,secret='test-secret-0123456789',secretSlot='test-slot'){return {DB:db,INGEST_HMAC_SECRETS:JSON.stringify({[secretSlot]:secret})};}

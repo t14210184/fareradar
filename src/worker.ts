@@ -51,8 +51,8 @@ const worker={
       try{return json({ok:true,...await enrichItineraryPolicy(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/offers/ingest"){
-      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
-      try{return json({ok:true,...await ingestOfferSnapshot(env.DB,JSON.parse(body))},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==='OFFER_ID_CONFLICT'?409:400);}
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401);
+      try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json({ok:true,...await ingestOfferSnapshot(env.DB,payload)},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==='OFFER_ID_CONFLICT'?409:400);}
     }
     if(req.method==="POST"&&u.pathname==="/candidate-plan/intake"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
@@ -118,8 +118,8 @@ const worker={
       try{return json({ok:true,...await disableSource(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/providers/runtime/readback"){
-      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
-      try{return json({ok:true,...await recordProviderRuntimeReadback(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401);
+      try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json({ok:true,...await recordProviderRuntimeReadback(env.DB,payload,new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/provider-search/enqueue"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
@@ -134,8 +134,8 @@ const worker={
       try{return json({ok:true,...await enqueueCheckoutReprice(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/pricing-quotes/ingest"){
-      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
-      try{return json({ok:true,...await ingestPricingQuote(env.DB,JSON.parse(body))},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==="PRICING_QUOTE_ID_CONFLICT"?409:400);}
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401);
+      try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json({ok:true,...await ingestPricingQuote(env.DB,payload)},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==="PRICING_QUOTE_ID_CONFLICT"?409:400);}
     }
     if(req.method==="POST"&&u.pathname==="/fx-snapshots/ingest"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
@@ -194,12 +194,12 @@ const worker={
       try{const p=JSON.parse(body);return json({ok:true,...await evaluateTransferBoundary(env.DB,p.boundary_id,new Date().toISOString())},200);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/provider-jobs/lease"){
-      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
-      try{return json({jobs:await leaseProviderJobs(env.DB,JSON.parse(body),new Date().toISOString())});}catch(e){return json({error:e instanceof Error?e.message:String(e)},409);}
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401);
+      try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json({jobs:await leaseProviderJobs(env.DB,payload,new Date().toISOString())});}catch(e){return json({error:e instanceof Error?e.message:String(e)},409);}
     }
     if(req.method==="POST"&&u.pathname==="/provider-jobs/complete"){
-      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
-      try{return json(await completeProviderJob(env.DB,JSON.parse(body),new Date().toISOString()));}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401);
+      try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json(await completeProviderJob(env.DB,payload,new Date().toISOString()));}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/search-campaigns/upsert"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
