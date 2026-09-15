@@ -19,3 +19,14 @@ def test_material_promo_rule_changes_do_not_collapse(run_cli):
     assert run_cli('promo-fingerprint',base) != run_cli('promo-fingerprint',changed)
     changed=dict(base); changed['travel_end']='2026-12-15'
     assert run_cli('promo-fingerprint',base) != run_cli('promo-fingerprint',changed)
+
+
+def test_price_and_fare_eligibility_are_part_of_promotion_identity(run_cli):
+    base={'market':'TW','airline':'MM','routes':['TPE-KIX'],'sale_start':'2026-09-15','travel_start':'2026-11-01'}
+    twd=dict(base); twd['sales_currency']='TWD'
+    jpy=dict(base); jpy['sales_currency']='JPY'
+    assert run_cli('promo-fingerprint',twd) != run_cli('promo-fingerprint',jpy)
+    branded=dict(twd); branded['fare_brand']='VALUE'
+    bagged=dict(twd); bagged['baggage_bundle']='CHECKED_20KG_INCLUDED'
+    assert run_cli('promo-fingerprint',twd) != run_cli('promo-fingerprint',branded)
+    assert run_cli('promo-fingerprint',twd) != run_cli('promo-fingerprint',bagged)

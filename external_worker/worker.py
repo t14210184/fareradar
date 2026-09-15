@@ -25,8 +25,15 @@ def structured_signal(text:str,source_id:str):
     if re.search(r'(?:app\s*(?:only|限定)|APP限定)',text,re.I): channel_requirements.append('APP_ONLY')
     if re.search(r'(?:line\s*(?:only|限定)|LINE限定)',text,re.I): channel_requirements.append('LINE_ONLY')
     channel_requirement='+'.join(sorted(set(channel_requirements))) if channel_requirements else None
+    flights=[]
+    for block in re.findall(r'(?:航班|班機|flight(?:s)?(?:\s*no\.?)?)\s*[:：#]?\s*((?:[A-Z0-9]{2}\s?\d{2,4})(?:\s*[/、,，]\s*[A-Z0-9]{2}\s?\d{2,4})*)',text,re.I):
+        flights.extend(re.sub(r'\s+','',x).upper() for x in re.findall(r'[A-Z0-9]{2}\s?\d{2,4}',block,re.I))
+    flights.extend(x.upper() for x in re.findall(r'\b([A-Z0-9]{2}\d{2,4})\b\s*(?:航班|班機)',text,re.I))
+    required_roundtrip=bool(re.search(r'(?:限|僅限|須|需).{0,6}(?:來回|round[\s-]?trip)|(?:來回|round[\s-]?trip).{0,6}(?:限定|only|must)',text,re.I))
+    coupon_required=bool(m or re.search(r'(?:須|需|請).{0,5}(?:輸入|使用).{0,5}(?:優惠碼|折扣碼|promo\s*code)',text,re.I))
+    currencies=sorted(set(x['currency'] for x in prices)); sales_currency=currencies[0] if len(currencies)==1 else None
     if not (routes or prices or keywords): return None
-    return {'extraction_type':'PROMOTION_SIGNAL','structured_payload':{'market':'TW','routes':sorted(set(routes)),'prices':prices,'promo_code':m.group(1).upper() if m else None,'keywords':keywords,'member_requirement':member_requirement,'channel_requirement':channel_requirement,'source_id':source_id}}
+    return {'extraction_type':'PROMOTION_SIGNAL','structured_payload':{'market':'TW','routes':sorted(set(routes)),'prices':prices,'promo_code':m.group(1).upper() if m else None,'keywords':keywords,'member_requirement':member_requirement,'channel_requirement':channel_requirement,'eligible_flight_numbers':sorted(set(flights)),'required_roundtrip':required_roundtrip,'coupon_required':coupon_required,'sales_currency':sales_currency,'source_id':source_id}}
 def sign_headers(secret:str,body:str,path:str,method:str='POST',key_id:str|None=None,nonce:str|None=None,ts:str|None=None):
     ts=ts or str(int(time.time()*1000)); key_id=key_id or os.environ.get('FARE_HMAC_KEY_ID')
     if not key_id:
