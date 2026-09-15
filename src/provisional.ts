@@ -5,7 +5,7 @@ import { enqueueAlertIntent } from "./outbox.js";
 
 function parse(raw:string|null|undefined){try{return raw?JSON.parse(raw):null}catch{return null}}
 function currentTerms(v:string|null|undefined){return !!v&&v!=="RECHECK_REQUIRED"&&Number.isFinite(Date.parse(v));}
-function routeFromStructure(raw:string|null|undefined){const x=parse(raw);const segs=Array.isArray(x?.slices?.[0]?.segments)?x.slices[0].segments:[];if(!segs.length)return null;const o=String(segs[0]?.origin??"").toUpperCase(),d=String(segs[segs.length-1]?.destination??"").toUpperCase();return /^[A-Z]{3}$/.test(o)&&/^[A-Z]{3}$/.test(d)?[o,d] as [string,string]:null;}
+function routeFromStructure(raw:string|null|undefined){const x=parse(raw);const segs=Array.isArray(x?.slices?.[0]?.segments)?x.slices[0].segments:[];if(!segs.length)return null;const o=String(segs[0]?.origin??"").toUpperCase(),d=String(segs[segs.length-1]?.destination??"").toUpperCase(),departing=String(segs[0]?.departing_at??"");const departureDate=/^\d{4}-\d{2}-\d{2}/.test(departing)?departing.slice(0,10):null;return /^[A-Z]{3}$/.test(o)&&/^[A-Z]{3}$/.test(d)&&departureDate?{origin:o,destination:d,departure_date:departureDate}:null;}
 function parseList(raw:string|null|undefined){const x=parse(raw);return Array.isArray(x)?x.map(String):[];}
 async function sourceTrust(db:D1Database,evidenceIds:string[]){
   if(!evidenceIds.length)return {trusted:false,sources:[] as string[]};const marks=evidenceIds.map(()=>'?').join(',');
@@ -15,8 +15,8 @@ async function sourceTrust(db:D1Database,evidenceIds:string[]){
 }
 async function routeRelevant(db:D1Database,profileId:string|null,offerStructure:string|null|undefined,nowIso:string){
   if(!profileId)return false;const route=routeFromStructure(offerStructure);if(!route)return false;
-  const rows=(await db.prepare("SELECT origin_airports_json,destination_airports_json FROM search_campaigns WHERE profile_id=? AND enabled=1 AND expires_at>?").bind(profileId,nowIso).all<any>()).results;
-  return rows.some(r=>parseList(r.origin_airports_json).includes(route[0])&&parseList(r.destination_airports_json).includes(route[1]));
+  const rows=(await db.prepare("SELECT origin_airports_json,destination_airports_json,departure_dates_json FROM search_campaigns WHERE profile_id=? AND enabled=1 AND expires_at>?").bind(profileId,nowIso).all<any>()).results;
+  return rows.some(r=>parseList(r.origin_airports_json).includes(route.origin)&&parseList(r.destination_airports_json).includes(route.destination)&&parseList(r.departure_dates_json).includes(route.departure_date));
 }
 export async function evaluateProvisionalCandidate(db:D1Database,itineraryId:string,nowIso:string,threshold=0.70,minSamples=5){
   const i=await db.prepare("SELECT itinerary_id,profile_id,verification_state,updated_at FROM itinerary_candidates WHERE itinerary_id=?").bind(itineraryId).first<any>();

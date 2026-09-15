@@ -16,5 +16,6 @@ def test_server_side_provisional_requires_baseline_trust_and_route_relevance():
     assert x['shadow']['triggered'] is False and x['shadow']['reason']=='DISCOVERY_SOURCE_NOT_TRUSTED'
     assert x['insufficient']['triggered'] is False and x['insufficient']['reason']=='BASELINE_SAMPLE_INSUFFICIENT'
     assert x['routeMismatch']['triggered'] is False and x['routeMismatch']['reason']=='ROUTE_NOT_RELEVANT'
+    assert x['dateMismatch']['triggered'] is False and x['dateMismatch']['reason']=='ROUTE_NOT_RELEVANT'
     assert x['expensive']['triggered'] is False and x['expensive']['reason']=='ANOMALY_THRESHOLD_NOT_MET'
     assert x['confirmed']['triggered'] is False and x['confirmed']['reason']=='NOT_PROBABLE'
