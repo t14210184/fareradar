@@ -2,6 +2,7 @@ import type { D1Database } from "./types.js";
 import { providerReady } from "./provider_runtime.js";
 import { completeVerificationJob } from "./scheduler.js";
 import { projectProviderJobResults } from "./provider_results.js";
+import { reserveProviderSearchBudget } from "./provider_pricing.js";
 
 async function sha256Hex(text:string){const d=new TextEncoder().encode(text);const h=await crypto.subtle.digest("SHA-256",d);return [...new Uint8Array(h)].map(x=>x.toString(16).padStart(2,"0")).join("");}
 function stable(v:any):string{if(v===null||typeof v!=="object")return JSON.stringify(v);if(Array.isArray(v))return `[${v.map(stable).join(",")}]`;return `{${Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+stable(v[k])).join(",")}}`;}
@@ -22,10 +23,12 @@ export async function enqueueProviderSearch(db:D1Database,input:{provider_id:str
   let caps:string[]=[];try{caps=JSON.parse(p.supported_verification_json??"[]");}catch{} if(!caps.includes("LIVE_REPRICE"))throw new Error("PROVIDER_CAPABILITY_NOT_ALLOWED");
   if(input.mode==="BACKGROUND"&&!p.background_allowed)throw new Error("PROVIDER_BACKGROUND_NOT_ALLOWED");
   const fp=await sha256Hex(stable(input.query)); const jobId=`provider:${input.provider_id}:${fp}`;
+  const existing=await db.prepare("SELECT job_id FROM verification_jobs WHERE job_id=?").bind(jobId).first();if(existing)return {job_id:jobId,query_fingerprint:fp,idempotent:true};
+  await reserveProviderSearchBudget(db,input.provider_id,nowIso);
   const payload={provider_id:input.provider_id,query_fingerprint:fp,mode:input.mode,query:input.query};
   await db.prepare("INSERT OR IGNORE INTO verification_jobs(job_id,job_type,target_class,source_id,payload_json,state,available_at,created_at,provider_id,query_fingerprint,provider_mode) VALUES(?,'LIVE_REPRICE','PROVIDER_API',NULL,?,'PENDING',?,?,?,?,?)")
     .bind(jobId,JSON.stringify(payload),nowIso,nowIso,input.provider_id,fp,input.mode).run();
-  return {job_id:jobId,query_fingerprint:fp};
+  return {job_id:jobId,query_fingerprint:fp,idempotent:false};
 }
 export async function leaseProviderJobs(db:D1Database,input:{provider_id:string;worker_id:string;limit?:number;verification_types?:string[]},nowIso:string){
   const requested=[...new Set(input.verification_types?.length?input.verification_types:["LIVE_REPRICE"])].filter(x=>["LIVE_REPRICE","CHECKOUT_REPRICE"].includes(x));
