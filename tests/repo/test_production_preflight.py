@@ -12,7 +12,15 @@ def test_local_env_cannot_fake_provider_readback(monkeypatch):
     assert 'CLOUDFLARE_AUTH_READBACK_MISSING' in got['blockers']
     assert 'PRODUCTION_SECRETS_READBACK_MISSING' in got['blockers']
 def test_placeholder_d1_blocks(): assert pf.d1_id() in pf.PLACEHOLDERS
-def test_local_gate_evidence_is_bound_to_exact_head(): assert pf.code_ready() is True
+def test_local_gate_evidence_validator_binds_exact_head_and_hashes(monkeypatch):
+    head='a'*40
+    data={'schema_version':2,'commit_sha':head,'spec_sha256':'spec','dependency_lock_hash':'dep','test_corpus_hash':'tests','summary':{'LOCAL_TEST_PASS':37,'LOCAL_TEST_FAIL':0,'EVIDENCE_INCOMPLETE':0},'gates':[{'gate_id':f'PG{i:02d}','commit_sha':head,'status':'LOCAL_TEST_PASS','acceptance_threshold':'x','report_sha256':'r'} for i in range(37)],'full_suite':{'status':'FULL_SUITE_PASS','returncode':0,'report_sha256':'full'}}
+    monkeypatch.setattr(pf,'_sha256_file',lambda p:'spec')
+    monkeypatch.setattr(pf,'_dependency_lock_hash',lambda:'dep')
+    monkeypatch.setattr(pf,'_test_corpus_hash',lambda:'tests')
+    assert pf.code_ready(head,data) is True
+    data['test_corpus_hash']='stale'; assert pf.code_ready(head,data) is False
+
 def test_legacy_ingest_auth_is_production_blocker(monkeypatch):
     monkeypatch.setenv('ALLOW_LEGACY_INGEST_TOKEN','1')
     got=pf.evaluate(remote='https://github.com/acme/fare-radar.git')

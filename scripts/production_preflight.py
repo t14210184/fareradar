@@ -19,11 +19,29 @@ def evidence_recent(data,max_hours=24,now=None):
         seen=dt.datetime.fromisoformat(str(data['observed_at']).replace('Z','+00:00')); now=now or dt.datetime.now(dt.timezone.utc)
         return seen.tzinfo is not None and dt.timedelta(0) <= now-seen <= dt.timedelta(hours=max_hours)
     except:return False
-def code_ready(head=None):
-    head=head or git_head(); d=load_json(ROOT/'evidence/gate-evidence-latest.json') or {}; s=d.get('summary',{})
-    if not head or d.get('commit_sha')!=head:return False
+def _sha256_bytes(data:bytes):
+    import hashlib; return hashlib.sha256(data).hexdigest()
+def _sha256_file(path:pathlib.Path): return _sha256_bytes(path.read_bytes())
+def _tree_hash(paths):
+    import hashlib
+    h=hashlib.sha256()
+    for p in sorted(paths,key=lambda x:x.as_posix()):
+        rel=p.relative_to(ROOT).as_posix().encode(); h.update(rel+b"\0"+p.read_bytes()+b"\0")
+    return h.hexdigest()
+def _dependency_lock_hash(): return _tree_hash([p for p in [ROOT/'package-lock.json',ROOT/'requirements-dev.txt'] if p.exists()])
+def _test_corpus_hash(): return _tree_hash([p for p in (ROOT/'tests').rglob('*') if p.is_file() and '__pycache__' not in p.parts])
+def code_ready(head=None,data=None):
+    head=head or git_head(); d=data if data is not None else (load_json(ROOT/'evidence/gate-evidence-latest.json') or {}); s=d.get('summary',{})
+    if not head or d.get('schema_version')!=2 or d.get('commit_sha')!=head:return False
+    if d.get('spec_sha256')!=_sha256_file(ROOT/'docs/SPEC_v1.3.md'):return False
+    if d.get('dependency_lock_hash')!=_dependency_lock_hash() or d.get('test_corpus_hash')!=_test_corpus_hash():return False
     if not (s.get('LOCAL_TEST_PASS')==37 and s.get('LOCAL_TEST_FAIL')==0 and s.get('EVIDENCE_INCOMPLETE')==0):return False
-    return all(g.get('commit_sha')==head and g.get('status')=='LOCAL_TEST_PASS' for g in d.get('gates',[])) and len(d.get('gates',[]))==37
+    gates=d.get('gates') or []
+    if len(gates)!=37 or [g.get('gate_id') for g in gates]!=[f'PG{i:02d}' for i in range(37)]:return False
+    if any(g.get('commit_sha')!=head or g.get('status')!='LOCAL_TEST_PASS' or not g.get('acceptance_threshold') or not g.get('report_sha256') for g in gates):return False
+    full=d.get('full_suite') or {}
+    return full.get('status')=='FULL_SUITE_PASS' and full.get('returncode')==0 and bool(full.get('report_sha256'))
+
 def d1_id():
     txt=(ROOT/'wrangler.jsonc').read_text(); m=re.search(r'"database_id"\s*:\s*"([^"]+)"',txt); return m.group(1) if m else ''
 def provider_evidence(name):return load_json(ROOT/'evidence/provider'/f'{name}.json')
