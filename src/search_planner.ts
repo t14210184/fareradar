@@ -11,6 +11,9 @@ function stable(v:any):string{if(v===null||typeof v!=="object")return JSON.strin
 function parse<T>(s:string):T{return JSON.parse(s) as T;}
 function routePair(v:unknown):[string,string]|null{if(typeof v!=="string")return null;const m=v.toUpperCase().match(/^([A-Z]{3})-([A-Z]{3})$/);return m?[m[1],m[2]]:null;}
 function travelWindow(raw:string|null|undefined){try{const x=raw?JSON.parse(raw):{};const start=typeof x.start==="string"?x.start.slice(0,10):null;const end=typeof x.end==="string"?x.end.slice(0,10):null;return {start:start&&isoDate(start)?start:null,end:end&&isoDate(end)?end:null};}catch{return {start:null,end:null};}}
+function promoConstraint(raw:string|null|undefined){try{const x=raw?JSON.parse(raw):{};return x&&typeof x==="object"?x:{};}catch{return {};}}
+function isoWeekday(date:string){const d=new Date(`${date}T00:00:00Z`).getUTCDay();return d===0?7:d;}
+function saleBoundary(v:unknown,end=false){if(typeof v!=="string"||!v)return null;const s=/^\d{4}-\d{2}-\d{2}$/.test(v)?`${v}T${end?"23:59:59.999":"00:00:00.000"}Z`:v;const t=Date.parse(s);return Number.isFinite(t)?t:null;}
 
 export interface SearchCampaignInput {
   campaign_id:string; profile_id:string; provider_id:string;
@@ -47,15 +50,18 @@ export async function planSearchesForQueue(db:D1Database,campaignId:string,queue
   const origins=new Set(parse<string[]>(c.origin_airports_json)),dests=new Set(parse<string[]>(c.destination_airports_json));
   const routes=(parse<unknown[]>(q.route_scope_json)??[]).map(routePair).filter((x):x is [string,string]=>!!x).filter(([o,d])=>origins.has(o)&&dests.has(d));
   if(!routes.length)return {created:0,reason:"ROUTE_OUTSIDE_CAMPAIGN"};
-  let tw={start:null as string|null,end:null as string|null};
+  let tw={start:null as string|null,end:null as string|null};let pc:any={};
   if(q.signal_type==="PROMOTION"){
-    const p=await db.prepare("SELECT travel_window,member_requirement,channel_requirement FROM promotion_events WHERE event_id=?").bind(q.signal_id).first<any>();
-    tw=travelWindow(p?.travel_window);
-    const access=await promotionEntitlementAccess(db,c.profile_id,{member_requirement:p?.member_requirement??null,channel_requirement:p?.channel_requirement??null},nowIso);
+    const p=await db.prepare("SELECT sale_window,travel_window,member_requirement,channel_requirement,constraint_json FROM promotion_events WHERE event_id=?").bind(q.signal_id).first<any>();
+    tw=travelWindow(p?.travel_window);pc=promoConstraint(p?.constraint_json);
+    const sw=travelWindow(p?.sale_window);const saleStart=saleBoundary(sw.start,false),saleEnd=saleBoundary(sw.end,true),now=Date.parse(nowIso);if(saleStart!==null&&now<saleStart)return {created:0,reason:"PROMOTION_SALE_NOT_ACTIVE"};if(saleEnd!==null&&now>saleEnd)return {created:0,reason:"PROMOTION_SALE_EXPIRED"};
+    if(pc.origin_market&&(c.market??null)!==pc.origin_market)return {created:0,reason:"PROMOTION_ORIGIN_MARKET_MISMATCH"};
+    const access=await promotionEntitlementAccess(db,c.profile_id,{member_requirement:p?.member_requirement??null,channel_requirement:p?.channel_requirement??null,member_only:!!pc.member_only,subscription_only:!!pc.subscription_only},nowIso);
     if(!access.allowed)return {created:0,reason:"PROMOTION_ENTITLEMENT_MISSING",missing:access.missing};
   }
-  const dates=parse<string[]>(c.departure_dates_json).filter(d=>(!tw.start||d>=tw.start)&&(!tw.end||d<=tw.end));
-  const lengths=parse<number[]>(c.trip_lengths_json); const passengers=parse<any[]>(c.passengers_json); const max=Number(c.max_queries_per_signal)||6;
+  const blackout=new Set(Array.isArray(pc.blackout_dates)?pc.blackout_dates.map(String):[]);const weekdays=new Set(Array.isArray(pc.eligible_weekdays)?pc.eligible_weekdays.map(Number):[]);
+  const dates=parse<string[]>(c.departure_dates_json).filter(d=>(!tw.start||d>=tw.start)&&(!tw.end||d<=tw.end)&&!blackout.has(d)&&(!weekdays.size||weekdays.has(isoWeekday(d))));
+  const lengths=parse<number[]>(c.trip_lengths_json).filter(n=>(!pc.required_roundtrip||n>0)&&(pc.minimum_stay==null||n>=Number(pc.minimum_stay))&&(pc.maximum_stay==null||n<=Number(pc.maximum_stay))); const passengers=parse<any[]>(c.passengers_json); const max=Number(c.max_queries_per_signal)||6;
   const queries:ExactFlightQuery[]=[];
   outer: for(const [origin,destination] of routes.sort((a,b)=>(a[0]+a[1]).localeCompare(b[0]+b[1]))) for(const date of dates.sort()) for(const nights of lengths.sort((a,b)=>a-b)){
     const slices=[{origin,destination,departure_date:date}];

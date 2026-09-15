@@ -52,11 +52,11 @@ export async function upsertRuntimeEntitlement(db:D1Database,input:RuntimeEntitl
     .bind(input.entitlement_id,input.profile_id,input.entitlement_type,input.entitlement_key.trim(),input.state,input.valid_from??null,input.valid_to??null,input.evidence_sha256,nowIso,nowIso).run();
   return {entitlement_id:input.entitlement_id,profile_id:input.profile_id};
 }
-export async function promotionEntitlementAccess(db:D1Database,profileId:string,requirements:{member_requirement?:string|null;channel_requirement?:string|null},nowIso:string){
+export async function promotionEntitlementAccess(db:D1Database,profileId:string,requirements:{member_requirement?:string|null;channel_requirement?:string|null;member_only?:boolean;subscription_only?:boolean},nowIso:string){
   const member=requirements.member_requirement?.trim()||null,channel=requirements.channel_requirement?.trim()||null;
-  if(!member&&!channel)return {allowed:true,missing:[] as string[]};
+  if(!member&&!channel&&!requirements.member_only&&!requirements.subscription_only)return {allowed:true,missing:[] as string[]};
   const rows=(await db.prepare(`SELECT entitlement_type,entitlement_key FROM runtime_entitlements WHERE profile_id=? AND state='ACTIVE' AND (valid_from IS NULL OR valid_from<=?) AND (valid_to IS NULL OR valid_to>=?)`).bind(profileId,nowIso,nowIso).all<{entitlement_type:string;entitlement_key:string}>()).results;
   const has=(types:string[],key:string|null)=>!key||rows.some(r=>types.includes(r.entitlement_type)&&r.entitlement_key===key);
-  const missing:string[]=[];if(!has(["MEMBER","SUBSCRIPTION"],member))missing.push(`MEMBER:${member}`);for(const key of (channel?channel.split("+").map(x=>x.trim()).filter(Boolean):[])){if(!has(["CHANNEL"],key))missing.push(`CHANNEL:${key}`);}
+  const missing:string[]=[];if(member&&!has(["MEMBER","SUBSCRIPTION"],member))missing.push(`MEMBER:${member}`);if(requirements.member_only&&!rows.some(r=>["MEMBER","SUBSCRIPTION"].includes(r.entitlement_type)))missing.push("MEMBER:ANY");if(requirements.subscription_only&&!rows.some(r=>r.entitlement_type==="SUBSCRIPTION"))missing.push("SUBSCRIPTION:ANY");for(const key of (channel?channel.split("+").map(x=>x.trim()).filter(Boolean):[])){if(!has(["CHANNEL"],key))missing.push(`CHANNEL:${key}`);}
   return {allowed:missing.length===0,missing};
 }
