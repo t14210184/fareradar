@@ -89,13 +89,13 @@ const worker={
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {worker_id:string;limit?:number}; return json({jobs:await leaseNotifications(env.DB,new Date().toISOString(),p.worker_id,Math.min(p.limit??10,10))});
     }
     if(req.method==="POST"&&u.pathname==="/notifications/ack"){
-      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body); return json({state:await ackNotification(env.DB,p,new Date().toISOString())});
+      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body); if(!p.worker_id)return json({error:"WORKER_ID_REQUIRED"},400); try{return json({state:await ackNotification(env.DB,p,new Date().toISOString())});}catch(e){return json({error:e instanceof Error?e.message:String(e)},409);}
     }
     if(req.method==="POST"&&u.pathname==="/domain/lease"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {worker_id:string;limit?:number}; return json({events:await claimDomainEvents(env.DB,new Date().toISOString(),p.worker_id,Math.min(p.limit??2,2))});
     }
     if(req.method==="POST"&&u.pathname==="/domain/ack"){
-      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); return json({state:await ackDomainEvent(env.DB,JSON.parse(body),new Date().toISOString())});
+      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body); if(!p.worker_id)return json({error:"WORKER_ID_REQUIRED"},400); try{return json({state:await ackDomainEvent(env.DB,p,new Date().toISOString())});}catch(e){return json({error:e instanceof Error?e.message:String(e)},409);}
     }
     if(req.method==="POST"&&u.pathname==="/verification-jobs/lease"){
       const body=await req.text(); if(!workerTokenAuthorized(req,env.WORKER_TOKEN))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {worker_id:string;limit?:number}; if(!p.worker_id)return json({error:"WORKER_ID_REQUIRED"},400); return json({jobs:await leaseVerificationJobs(env.DB,new Date().toISOString(),p.worker_id,Math.min(p.limit??5,5))});

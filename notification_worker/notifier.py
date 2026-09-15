@@ -21,7 +21,7 @@ def run_once(base_url:str,secret:str,worker_id:str,deal_url:str|None,admin_url:s
         else:
             try: outcome=send_webhook(endpoint,json.loads(j['payload_json']),nid,attempt)
             except Exception as e: outcome={'ok':False,'retryable':True,'status':0,'error':type(e).__name__+':'+str(e)[:300]}
-        ack={'notification_id':nid,'ok':outcome['ok'],'retryable':outcome['retryable'],'error':None if outcome['ok'] else outcome.get('error') or f"HTTP_{outcome.get('status',0)}"}
+        ack={'notification_id':nid,'worker_id':worker_id,'ok':outcome['ok'],'retryable':outcome['retryable'],'error':None if outcome['ok'] else outcome.get('error') or f"HTTP_{outcome.get('status',0)}"}
         post_json(base_url,'/notifications/ack',ack,secret); results.append({'notification_id':nid,'channel':channel,**outcome})
     return results
 

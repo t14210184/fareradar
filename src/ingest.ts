@@ -59,8 +59,8 @@ export async function projectDomainEvents(db:D1Database,nowIso:string,workerId="
       } else if(e.event_type==="PRICING_QUOTE"){
         await applyPricingQuoteEvidence(db,e.entity_id,nowIso);
       }
-      await ackDomainEvent(db,{id:Number(e.id),ok:true},nowIso);done++;
-    }catch(err){await ackDomainEvent(db,{id:Number((e as any).id),ok:false,error:err instanceof Error?err.message:String(err)},nowIso)}
+      await ackDomainEvent(db,{id:Number(e.id),worker_id:workerId,ok:true},nowIso);done++;
+    }catch(err){await ackDomainEvent(db,{id:Number((e as any).id),worker_id:workerId,ok:false,error:err instanceof Error?err.message:String(err)},nowIso)}
   }
   return {claimed:events.length,done};
 }
