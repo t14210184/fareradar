@@ -2,6 +2,7 @@ import type { D1Database } from "./types.js";
 import { ackCandidateSignal } from "./priority.js";
 import { enqueueAlertIntent } from "./outbox.js";
 import { enqueueAgencyCheckoutJob } from "./agency_checkout.js";
+import { assertAgencyUrlAllowed } from "./agency_security.js";
 function assert(c:boolean,m:string):asserts c{if(!c)throw new Error(m);}
 function sha(v:string){return /^[a-f0-9]{64}$/i.test(v);}
 function terms(v:string|null|undefined){return !!v&&v!=="RECHECK_REQUIRED"&&Number.isFinite(Date.parse(v));}
@@ -22,6 +23,7 @@ export async function completeAgencyRecheck(db:D1Database,input:AgencyRecheckInp
   const partner=await partnerReady(db,input.agency_id);assert(!!partner,"AGENCY_PARTNER_NOT_ENABLED");
   const row=await db.prepare(`SELECT q.state,q.claimed_by,q.lease_until,q.signal_id,a.currency,a.tax_inclusion,a.baggage,a.product_id,a.booking_or_contact_channel FROM candidate_priority_queue q JOIN agency_inventory_offers a ON a.agency_offer_id=q.signal_id WHERE q.queue_id=? AND q.signal_type='AGENCY_CLEARANCE' AND q.required_verification='SELLER_RECHECK' AND a.agency_id=?`).bind(input.queue_id,input.agency_id).first<any>();
   assert(!!row&&row.signal_id===input.agency_offer_id&&row.state==="LEASED"&&row.claimed_by===input.worker_id&&row.lease_until&&Date.parse(row.lease_until)>Date.parse(nowIso),"AGENCY_RECHECK_LIVE_LEASE_REQUIRED");
+  await assertAgencyUrlAllowed(db,input.agency_id,input.source_url,row.booking_or_contact_channel);
   let result:"SELLER_CONFIRMED"|"SOLD_OUT"|"RECHECK_REQUIRED"="SELLER_CONFIRMED",retryable=false,error:string|null=null;
   if(input.currency!==row.currency){result="RECHECK_REQUIRED";retryable=true;error="AGENCY_RECHECK_CURRENCY_MISMATCH";}else if(input.anonymous_payment){result="RECHECK_REQUIRED";retryable=true;error="AGENCY_ANONYMOUS_PAYMENT_BLOCKED";}else if(input.seats_available===0){result="SOLD_OUT";}
   await db.prepare("INSERT INTO agency_recheck_evidence(recheck_id,queue_id,agency_offer_id,agency_id,worker_id,readback_basis,source_url,content_sha256,observed_at,price,currency,seats_available,booking_deadline,ticketing_deadline,result_state,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")

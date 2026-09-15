@@ -1,5 +1,6 @@
 import type { D1Database } from "./types.js";
 import { emailTrust } from "./source.js";
+import { assertAgencyUrlAllowed } from "./agency_security.js";
 function shaOK(x:string){return /^[a-f0-9]{64}$/i.test(x)}
 function timeOK(x:string){return Number.isFinite(Date.parse(x))}
 export async function ingestAgencyOffer(db:D1Database,input:any,nowIso:string){
@@ -9,6 +10,7 @@ export async function ingestAgencyOffer(db:D1Database,input:any,nowIso:string){
   const agency=await db.prepare("SELECT source_id,status,verified_business,terms_snapshot_at FROM agency_partner_registry WHERE agency_id=?").bind(input.agency_id).first<any>();
   if(!agency||agency.status!=="ENABLED"||Number(agency.verified_business)!==1||agency.source_id!==input.source_id||!agency.terms_snapshot_at||agency.terms_snapshot_at==='RECHECK_REQUIRED')throw new Error('AGENCY_PARTNER_NOT_ENABLED');
   const src=await db.prepare("SELECT access_basis FROM source_registry WHERE source_id=?").bind(input.source_id).first<any>(); if(!src)throw new Error('SOURCE_NOT_ALLOWED');
+  await assertAgencyUrlAllowed(db,input.agency_id,input.booking_or_contact_channel); if(input.canonical_url)await assertAgencyUrlAllowed(db,input.agency_id,input.canonical_url,input.booking_or_contact_channel);
   const offerPayload={agency_offer_id:input.agency_offer_id,agency_id:input.agency_id,product_id:input.product_id,origin:input.origin,destination:input.destination,price:input.price,currency:input.currency,state:'AGENCY_CLAIMED'};
   await db.batch([
     db.prepare("INSERT OR IGNORE INTO source_observations(observation_id,source_id,observed_at,canonical_url,content_sha256,parser_version,access_basis,privacy_class,access_basis_snapshot,retention_until,content_version) VALUES(?,?,?,?,?,?,?,'PARTNER_STRUCTURED',?,?,1)").bind(input.observation_id,input.source_id,input.observed_at,input.canonical_url??null,input.content_sha256,input.parser_version??'agency-intake-1',src.access_basis,src.access_basis,new Date(Date.parse(input.observed_at)+180*86400000).toISOString()),

@@ -9,6 +9,7 @@ def test_agency_seller_recheck_is_partner_and_lease_scoped():
     x=json.loads(p.stdout)
     assert x['none']==0 and x['leased']==1
     assert x['wrongWorker']=='AGENCY_RECHECK_LIVE_LEASE_REQUIRED'
+    assert x['wrongDomain']=='AGENCY_URL_DOMAIN_MISMATCH'
     assert x['ok']['result']=='SELLER_CONFIRMED' and x['ok']['state']=='DONE'
     assert x['idem']['idempotent'] is True and x['intents']==1
     assert x['row']=={'seller_verification_state':'VERIFIED_READBACK','price':6888.0,'seats_available':1,'state':'SELLER_CONFIRMED'}
@@ -25,6 +26,7 @@ def test_agency_checkout_reproduction_requires_complete_total_and_live_lease():
     x=json.loads(p.stdout)
     assert x['none']==0
     assert x['wrongWorker']=='AGENCY_CHECKOUT_LIVE_LEASE_REQUIRED'
+    assert x['wrongDomain']=='AGENCY_URL_DOMAIN_MISMATCH'
     assert x['paymentBlocked']=='AGENCY_CHECKOUT_PAYMENT_FORBIDDEN'
     assert x['incomplete']['result']=='RECHECK_REQUIRED' and x['incomplete']['state']=='RETRY'
     assert x['ok']['result']=='CHECKOUT_REPRODUCED' and x['ok']['state']=='DONE'

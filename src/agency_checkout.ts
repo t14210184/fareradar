@@ -1,5 +1,6 @@
 import type { D1Database } from "./types.js";
 import { enqueueAlertIntent } from "./outbox.js";
+import { assertAgencyUrlAllowed } from "./agency_security.js";
 
 function assert(c:boolean,m:string):asserts c{if(!c)throw new Error(m);}
 function sha(v:string){return /^[a-f0-9]{64}$/i.test(v);}
@@ -52,6 +53,7 @@ export async function completeAgencyCheckout(db:D1Database,input:AgencyCheckoutI
   const row=await db.prepare(`SELECT j.state,j.claimed_by,j.lease_until,j.attempts,j.agency_offer_id,j.agency_id,a.currency,a.product_id,a.tax_inclusion,a.baggage,a.booking_or_contact_channel,a.state offer_state
     FROM agency_checkout_jobs j JOIN agency_inventory_offers a ON a.agency_offer_id=j.agency_offer_id WHERE j.job_id=? AND j.agency_id=?`).bind(input.job_id,input.agency_id).first<any>();
   assert(!!row&&row.agency_offer_id===input.agency_offer_id&&row.state==="LEASED"&&row.claimed_by===input.worker_id&&row.lease_until&&Date.parse(row.lease_until)>Date.parse(nowIso),"AGENCY_CHECKOUT_LIVE_LEASE_REQUIRED");
+  await assertAgencyUrlAllowed(db,input.agency_id,input.checkout_url,row.booking_or_contact_channel);
   assert(row.offer_state==="SELLER_CONFIRMED"||row.offer_state==="CHECKOUT_REPRODUCED","AGENCY_SELLER_CONFIRMATION_REQUIRED");
   let result:"CHECKOUT_REPRODUCED"|"SOLD_OUT"|"RECHECK_REQUIRED"="CHECKOUT_REPRODUCED",retryable=false,error:string|null=null;
   if(input.currency!==row.currency){result="RECHECK_REQUIRED";retryable=true;error="AGENCY_CHECKOUT_CURRENCY_MISMATCH";}
