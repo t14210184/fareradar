@@ -79,12 +79,13 @@ export async function dispatchProviderSearchPlans(db:D1Database,nowIso:string,li
 export async function planDueCandidateSearches(db:D1Database,nowIso:string,signalLimit=8,campaignLimit=4){
   const signals=(await db.prepare(`SELECT q.queue_id,q.route_scope_json FROM candidate_priority_queue q
     WHERE q.state='PENDING' AND q.required_verification='LIVE_REPRICE'
-      AND NOT EXISTS (SELECT 1 FROM provider_search_plans p WHERE p.queue_id=q.queue_id)
     ORDER BY q.priority_score DESC,q.first_observed_at ASC LIMIT ?`).bind(Math.min(signalLimit,8)).all<any>()).results;
   const campaigns=(await db.prepare("SELECT campaign_id,origin_airports_json,destination_airports_json FROM search_campaigns WHERE enabled=1 AND expires_at>? ORDER BY updated_at ASC LIMIT ?").bind(nowIso,Math.min(campaignLimit,4)).all<any>()).results;
+  const queueIds=signals.map((x:any)=>x.queue_id); const used=new Set<string>();
+  if(queueIds.length){const marks=queueIds.map(()=>'?').join(',');const prior=(await db.prepare(`SELECT queue_id,campaign_id FROM provider_search_plans WHERE queue_id IN (${marks})`).bind(...queueIds).all<any>()).results;for(const x of prior)used.add(`${x.queue_id}|${x.campaign_id}`);}
   for(const q of signals){
     const routes=(parse<unknown[]>(q.route_scope_json)??[]).map(routePair).filter((x):x is [string,string]=>!!x);
-    for(const c of campaigns){const origins=new Set(parse<string[]>(c.origin_airports_json)),dests=new Set(parse<string[]>(c.destination_airports_json));if(routes.some(([o,d])=>origins.has(o)&&dests.has(d))){const result=await planSearchesForQueue(db,c.campaign_id,q.queue_id,nowIso);return {queue_id:q.queue_id,campaign_id:c.campaign_id,...result};}}
+    for(const c of campaigns){if(used.has(`${q.queue_id}|${c.campaign_id}`))continue;const origins=new Set(parse<string[]>(c.origin_airports_json)),dests=new Set(parse<string[]>(c.destination_airports_json));if(routes.some(([o,d])=>origins.has(o)&&dests.has(d))){const result=await planSearchesForQueue(db,c.campaign_id,q.queue_id,nowIso);return {queue_id:q.queue_id,campaign_id:c.campaign_id,...result};}}
   }
   return {created:0,reason:"NO_MATCHING_CAMPAIGN"};
 }

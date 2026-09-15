@@ -1,6 +1,7 @@
 import type { D1Database } from "./types.js";
 import { providerReady } from "./provider_runtime.js";
 import { completeVerificationJob } from "./scheduler.js";
+import { projectProviderJobResults } from "./provider_results.js";
 
 async function sha256Hex(text:string){const d=new TextEncoder().encode(text);const h=await crypto.subtle.digest("SHA-256",d);return [...new Uint8Array(h)].map(x=>x.toString(16).padStart(2,"0")).join("");}
 function stable(v:any):string{if(v===null||typeof v!=="object")return JSON.stringify(v);if(Array.isArray(v))return `[${v.map(stable).join(",")}]`;return `{${Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+stable(v[k])).join(",")}}`;}
@@ -37,4 +38,4 @@ export async function leaseProviderJobs(db:D1Database,input:{provider_id:string;
     AND state='PENDING' RETURNING job_id,provider_id,query_fingerprint,provider_mode,payload_json,attempts,lease_until`)
     .bind(input.worker_id,until,input.provider_id,nowIso,backgroundAllowed,Math.min(input.limit??5,5)).all()).results;
 }
-export async function completeProviderJob(db:D1Database,input:{job_id:string;provider_id:string;success:boolean;error?:string|null},nowIso:string){return completeVerificationJob(db,{job_id:input.job_id,source_id:input.provider_id,success:input.success,error:input.error??null},nowIso);}
+export async function completeProviderJob(db:D1Database,input:{job_id:string;provider_id:string;success:boolean;error?:string|null},nowIso:string){const state=await completeVerificationJob(db,{job_id:input.job_id,source_id:input.provider_id,success:input.success,error:input.error??null},nowIso); const projection=input.success&&state==="DONE"?await projectProviderJobResults(db,input.job_id,nowIso):{consumers:0,projected:0}; return {state,projection};}

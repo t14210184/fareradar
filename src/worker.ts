@@ -102,7 +102,7 @@ const worker={
     }
     if(req.method==="POST"&&u.pathname==="/provider-jobs/complete"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
-      try{return json({state:await completeProviderJob(env.DB,JSON.parse(body),new Date().toISOString())});}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+      try{return json(await completeProviderJob(env.DB,JSON.parse(body),new Date().toISOString()));}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/search-campaigns/upsert"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);

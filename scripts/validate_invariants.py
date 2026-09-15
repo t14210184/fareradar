@@ -24,7 +24,9 @@ required={
 'verification_jobs':{'job_id','target_class','source_id','state','attempts','available_at','lease_until'},
 'source_outcome_attributions':{'attribution_id','itinerary_id','source_id','observation_id','outcome_type','first_win','window_date','observed_at','confirmed_at'},
 'search_campaigns':{'campaign_id','profile_id','provider_id','departure_dates_json','trip_lengths_json','passengers_json','max_queries_per_signal','enabled','expires_at'},
-'provider_search_plans':{'plan_id','campaign_id','queue_id','provider_id','query_fingerprint','query_json','state','provider_job_id','next_attempt_at'} }
+'provider_search_plans':{'plan_id','campaign_id','queue_id','provider_id','query_fingerprint','query_json','state','provider_job_id','next_attempt_at'},
+'candidate_offer_links':{'queue_id','plan_id','job_id','provider_offer_id','query_fingerprint'},
+'candidate_verification_results':{'result_id','queue_id','query_fingerprint','verification_state','reason','best_offer_id','live_offer_count','provider_count'} }
 for table, cols in required.items():
     got={r[1] for r in db.execute(f'pragma table_info({table})')}
     missing=cols-got
