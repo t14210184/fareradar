@@ -41,4 +41,11 @@ export async function leaseProviderJobs(db:D1Database,input:{provider_id:string;
     AND state='PENDING' RETURNING job_id,job_type,provider_id,query_fingerprint,provider_mode,payload_json,attempts,lease_until`)
     .bind(input.worker_id,until,input.provider_id,...allowed,nowIso,backgroundAllowed,Math.min(input.limit??5,5)).all()).results;
 }
-export async function completeProviderJob(db:D1Database,input:{job_id:string;provider_id:string;success:boolean;error?:string|null},nowIso:string){const state=await completeVerificationJob(db,{job_id:input.job_id,source_id:input.provider_id,success:input.success,error:input.error??null},nowIso); const projection=input.success&&state==="DONE"?await projectProviderJobResults(db,input.job_id,nowIso):{consumers:0,projected:0}; return {state,projection};}
+export async function completeProviderJob(db:D1Database,input:{job_id:string;provider_id:string;worker_id:string;success:boolean;error?:string|null},nowIso:string){
+  const row=await db.prepare("SELECT provider_id,claimed_by,lease_until,state,target_class FROM verification_jobs WHERE job_id=?").bind(input.job_id).first<any>();
+  if(!row)throw new Error("VERIFICATION_JOB_NOT_FOUND");
+  if(row.target_class!=="PROVIDER_API"||row.provider_id!==input.provider_id)throw new Error("PROVIDER_JOB_LEASE_REQUIRED");
+  if(row.state==="DONE"){const projection=input.success?await projectProviderJobResults(db,input.job_id,nowIso):{consumers:0,projected:0};return {state:"DONE",projection,idempotent:true};}
+  if(row.state!=="LEASED"||row.claimed_by!==input.worker_id||!row.lease_until||Date.parse(row.lease_until)<=Date.parse(nowIso))throw new Error("PROVIDER_JOB_LEASE_REQUIRED");
+  const state=await completeVerificationJob(db,{job_id:input.job_id,source_id:input.provider_id,success:input.success,error:input.error??null},nowIso); const projection=input.success&&state==="DONE"?await projectProviderJobResults(db,input.job_id,nowIso):{consumers:0,projected:0}; return {state,projection};
+}

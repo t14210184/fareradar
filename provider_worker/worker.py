@@ -18,8 +18,8 @@ def run_once(base_url:str,secret:str,token:str|None,worker_id:str,cloud_post=pos
                 if not payment_card: raise ValueError('PAYMENT_CREDENTIAL_MISSING')
                 priced=duffel.price_offer(payload['provider_offer_id'],token,payload.get('selected_services') or [],payment_card,duffel_price_transport)
                 quote=duffel.normalize_price_quote(priced,payload['provider_offer_id'],payload['payment_profile_id'],payload.get('selected_services') or [],job['job_id'],now)
-                cloud_post(base_url,'/pricing-quotes/ingest',quote,secret)
-                cloud_post(base_url,'/provider-jobs/complete',{'job_id':job['job_id'],'provider_id':'duffel','success':True},secret)
+                cloud_post(base_url,'/pricing-quotes/ingest',{**quote,'worker_id':worker_id},secret)
+                cloud_post(base_url,'/provider-jobs/complete',{'job_id':job['job_id'],'provider_id':'duffel','worker_id':worker_id,'success':True},secret)
                 results.append({'job_id':job['job_id'],'status':'DONE','quote_id':quote['quote_id']}); continue
             if job.get('job_type') not in (None,'LIVE_REPRICE'): raise ValueError('PROVIDER_JOB_TYPE_UNSUPPORTED')
             query=payload['query']; qfp=job.get('query_fingerprint') or payload['query_fingerprint']
@@ -29,11 +29,11 @@ def run_once(base_url:str,secret:str,token:str|None,worker_id:str,cloud_post=pos
                 if not oid: continue
                 try:detailed=duffel.refresh_offer(oid,token,duffel_detail_transport)
                 except Exception: continue
-                snap=duffel.normalize_offer(detailed,query,qfp,job['job_id'],now,'REFRESHED_LIVE'); cloud_post(base_url,'/offers/ingest',snap,secret); normalized.append(snap['provider_offer_id'])
-            cloud_post(base_url,'/provider-jobs/complete',{'job_id':job['job_id'],'provider_id':'duffel','success':True},secret)
+                snap=duffel.normalize_offer(detailed,query,qfp,job['job_id'],now,'REFRESHED_LIVE'); cloud_post(base_url,'/offers/ingest',{**snap,'worker_id':worker_id},secret); normalized.append(snap['provider_offer_id'])
+            cloud_post(base_url,'/provider-jobs/complete',{'job_id':job['job_id'],'provider_id':'duffel','worker_id':worker_id,'success':True},secret)
             results.append({'job_id':job['job_id'],'status':'DONE','offers':normalized})
         except Exception as e:
-            try:cloud_post(base_url,'/provider-jobs/complete',{'job_id':job['job_id'],'provider_id':'duffel','success':False,'error':type(e).__name__+':'+str(e)[:300]},secret)
+            try:cloud_post(base_url,'/provider-jobs/complete',{'job_id':job['job_id'],'provider_id':'duffel','worker_id':worker_id,'success':False,'error':type(e).__name__+':'+str(e)[:300]},secret)
             finally:results.append({'job_id':job['job_id'],'status':'FAILED','error':str(e)})
     return results
 

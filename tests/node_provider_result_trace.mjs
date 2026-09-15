@@ -10,19 +10,19 @@ await enqueueCandidateSignal(db,{signal_type:'PROMOTION',signal_id:'promo-result
 const queueId='promotion:promo-result', qfp='qfp-shared';
 for(const [n,p] of [[1,'p1'],[2,'p2']]){
   raw.prepare("insert into search_campaigns(campaign_id,profile_id,provider_id,origin_airports_json,destination_airports_json,departure_dates_json,trip_lengths_json,passengers_json,max_queries_per_signal,enabled,expires_at,created_at,updated_at) values(?,?,?,?,?,?,?,?,2,1,'2026-12-31T00:00:00Z','2026-09-15T00:00:00Z','2026-09-15T00:00:00Z')").run(`c${n}`,'synthetic',p,'["TPE"]','["KIX"]','["2026-11-02"]','[3]','[{"type":"adult"}]');
-  raw.prepare("insert into verification_jobs(job_id,job_type,target_class,payload_json,state,attempts,available_at,created_at,provider_id,query_fingerprint,provider_mode) values(?, 'LIVE_REPRICE','PROVIDER_API','{}','LEASED',1,'2026-09-15T00:00:00Z','2026-09-15T00:00:00Z',?,?,'USER_REQUEST')").run(`job${n}`,p,qfp);
+  raw.prepare("insert into verification_jobs(job_id,job_type,target_class,payload_json,state,attempts,available_at,created_at,provider_id,query_fingerprint,provider_mode,claimed_by,lease_until) values(?, 'LIVE_REPRICE','PROVIDER_API','{}','LEASED',1,'2026-09-15T00:00:00Z','2026-09-15T00:00:00Z',?,?,'USER_REQUEST',?,?)").run(`job${n}`,p,qfp,`worker-${p}`,'2026-09-15T00:10:00Z');
   raw.prepare("insert into provider_search_plans(plan_id,campaign_id,queue_id,provider_id,query_fingerprint,query_json,state,provider_job_id,attempts,next_attempt_at,created_at,updated_at) values(?,?,?,?,?,'{}','DISPATCHED',?,1,'2026-09-15T00:00:00Z','2026-09-15T00:00:00Z','2026-09-15T00:00:00Z')").run(`plan${n}`,`c${n}`,queueId,p,qfp,`job${n}`);
   raw.prepare("insert into provider_job_consumers(job_id,plan_id,queue_id,created_at) values(?,?,?,'2026-09-15T00:00:00Z')").run(`job${n}`,`plan${n}`,queueId);
 }
 await ingestOfferSnapshot(db,{provider_offer_id:'offer-p1',query_fingerprint:qfp,provider:'p1',currency:'TWD',observed_at:'2026-09-15T00:01:00Z',expires_at:'2026-09-15T04:00:00Z',raw_sha256:'1'.repeat(64),source_snapshot_id:'job1',offer_total:5000,fare_freshness:'LIVE',cached_or_live:'LIVE'});
-const first=await completeProviderJob(db,{job_id:'job1',provider_id:'p1',success:true},'2026-09-15T00:02:00Z');
+const first=await completeProviderJob(db,{job_id:'job1',provider_id:'p1',worker_id:'worker-p1',success:true},'2026-09-15T00:02:00Z');
 const afterFirst=raw.prepare("select verification_state,reason,live_offer_count,provider_count from candidate_verification_results where queue_id=?").get(queueId);
 const stateAfterFirst=raw.prepare("select state from candidate_priority_queue where queue_id=?").get(queueId).state;
 await ingestOfferSnapshot(db,{provider_offer_id:'offer-p2',query_fingerprint:qfp,provider:'p2',currency:'TWD',observed_at:'2026-09-15T00:03:00Z',expires_at:'2026-09-15T04:00:00Z',raw_sha256:'2'.repeat(64),source_snapshot_id:'job2',offer_total:5050,fare_freshness:'LIVE',cached_or_live:'LIVE'});
-const second=await completeProviderJob(db,{job_id:'job2',provider_id:'p2',success:true},'2026-09-15T00:04:00Z');
+const second=await completeProviderJob(db,{job_id:'job2',provider_id:'p2',worker_id:'worker-p2',success:true},'2026-09-15T00:04:00Z');
 const final=raw.prepare("select verification_state,reason,best_offer_id,best_offer_total,live_offer_count,provider_count from candidate_verification_results where queue_id=?").get(queueId);
 const state=raw.prepare("select state from candidate_priority_queue where queue_id=?").get(queueId).state;
 const links=raw.prepare("select provider_offer_id,job_id from candidate_offer_links where queue_id=? order by provider_offer_id").all(queueId);
-await completeProviderJob(db,{job_id:'job2',provider_id:'p2',success:true},'2026-09-15T00:05:00Z');
+await completeProviderJob(db,{job_id:'job2',provider_id:'p2',worker_id:'worker-p2',success:true},'2026-09-15T00:05:00Z');
 const linksAfterReplay=raw.prepare("select count(*) n from candidate_offer_links where queue_id=?").get(queueId).n;
 console.log(JSON.stringify({first,afterFirst,stateAfterFirst,second,final,state,links,linksAfterReplay}));

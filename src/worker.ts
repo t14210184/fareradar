@@ -20,7 +20,7 @@ import { ingestCarrierTicketingPolicy, evaluateTicketingGuards } from "./ticketi
 import { ingestConnectionBufferPolicy, ingestAirportChangePolicy, evaluateTransferBoundary } from "./transfer_runtime.js";
 import { evaluateActionableFromDb } from "./readiness_runtime.js";
 import { buildCanonicalCandidateAlert } from "./alert_runtime.js";
-import { authorizeRequest, principalAllowsPayload, cleanupExpiredNonces, workerTokenAuthorized, workerLeaseAllowsSource, type AuthEnv } from "./auth.js";
+import { authorizeRequest, principalAllowsPayload, cleanupExpiredNonces, workerTokenAuthorized, workerLeaseAllowsSource, providerLeaseAllowsJob, type AuthEnv } from "./auth.js";
 
 export interface Env extends AuthEnv { WORKER_TOKEN?:string; }
 async function authorized(req:Request,body:string,env:Env){return authorizeRequest(req,body,env);}
@@ -52,7 +52,7 @@ const worker={
     }
     if(req.method==="POST"&&u.pathname==="/offers/ingest"){
       const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401);
-      try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json({ok:true,...await ingestOfferSnapshot(env.DB,payload)},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==='OFFER_ID_CONFLICT'?409:400);}
+      try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);if(principal.provider_id&&(!payload.worker_id||!payload.source_snapshot_id||!await providerLeaseAllowsJob(env.DB,{job_id:payload.source_snapshot_id,worker_id:payload.worker_id,provider_id:principal.provider_id,job_type:"LIVE_REPRICE"},new Date().toISOString())))return json({error:"LIVE_PROVIDER_LEASE_REQUIRED"},403);return json({ok:true,...await ingestOfferSnapshot(env.DB,payload)},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==='OFFER_ID_CONFLICT'?409:400);}
     }
     if(req.method==="POST"&&u.pathname==="/candidate-plan/intake"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
@@ -135,7 +135,7 @@ const worker={
     }
     if(req.method==="POST"&&u.pathname==="/pricing-quotes/ingest"){
       const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401);
-      try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json({ok:true,...await ingestPricingQuote(env.DB,payload)},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==="PRICING_QUOTE_ID_CONFLICT"?409:400);}
+      try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);if(principal.provider_id&&(!payload.worker_id||!payload.source_job_id||!await providerLeaseAllowsJob(env.DB,{job_id:payload.source_job_id,worker_id:payload.worker_id,provider_id:principal.provider_id,job_type:"CHECKOUT_REPRICE"},new Date().toISOString())))return json({error:"LIVE_PROVIDER_LEASE_REQUIRED"},403);return json({ok:true,...await ingestPricingQuote(env.DB,payload)},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==="PRICING_QUOTE_ID_CONFLICT"?409:400);}
     }
     if(req.method==="POST"&&u.pathname==="/fx-snapshots/ingest"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);

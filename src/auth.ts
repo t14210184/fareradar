@@ -56,3 +56,8 @@ export async function workerLeaseAllowsSource(db:D1Database,input:{job_id:string
   const row=await db.prepare("SELECT source_id,claimed_by,lease_until,state,target_class FROM verification_jobs WHERE job_id=?").bind(input.job_id).first<any>();
   return !!(row&&row.target_class==="EXTERNAL_HEAVY"&&row.state==="LEASED"&&row.claimed_by===input.worker_id&&row.source_id===input.source_id&&row.lease_until&&Date.parse(row.lease_until)>Date.parse(nowIso));
 }
+
+export async function providerLeaseAllowsJob(db:D1Database,input:{job_id:string;worker_id:string;provider_id:string;job_type?:string},nowIso:string){
+  const row=await db.prepare("SELECT provider_id,claimed_by,lease_until,state,target_class,job_type FROM verification_jobs WHERE job_id=?").bind(input.job_id).first<any>();
+  return !!(row&&row.target_class==="PROVIDER_API"&&row.state==="LEASED"&&row.claimed_by===input.worker_id&&row.provider_id===input.provider_id&&row.lease_until&&Date.parse(row.lease_until)>Date.parse(nowIso)&&(!input.job_type||row.job_type===input.job_type));
+}
