@@ -107,7 +107,7 @@ const worker={
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {provider_id:string;worker_id:string;verification_type:"LIVE_REPRICE"|"SELLER_RECHECK";limit?:number}; const now=new Date().toISOString(); const ready=await providerReady(env.DB,{...p,background:true},now); if(!ready.ready)return json({error:ready.reason},409); return json({signals:await leaseCandidateSignals(env.DB,now,p.worker_id,Math.min(p.limit??5,5),90,p.verification_type)});
     }
     if(req.method==="POST"&&u.pathname==="/candidate-priority/ack"){
-      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); return json({state:await ackCandidateSignal(env.DB,JSON.parse(body),new Date().toISOString())});
+      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body); if(!p.worker_id)return json({error:"WORKER_ID_REQUIRED"},400); try{return json({state:await ackCandidateSignal(env.DB,p,new Date().toISOString())});}catch(e){return json({error:e instanceof Error?e.message:String(e)},409);}
     }
     if(req.method==="POST"&&u.pathname==="/sources/onboarding/review"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);

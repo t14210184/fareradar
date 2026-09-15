@@ -6,5 +6,5 @@ def test_candidate_priority_queue_idempotent_lease_retry():
     x=json.loads(p.stdout)
     assert x['count']==1 and x['score']==80
     assert x['first']==1 and x['retry']=='RETRY'
-    assert x['tooEarly']==0 and x['later']==1
+    assert x['tooEarly']==0 and x['later']==1 and x['wrongAck'] is True
     assert x['done']=='DONE' and x['state']=='DONE'
