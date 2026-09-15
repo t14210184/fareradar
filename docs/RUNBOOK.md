@@ -68,3 +68,10 @@ node tests/node_live_offer_expiry_redundant.mjs
 ```
 
 The capacity fixtures require the normal five-minute path to stay at or below the internal 40-query target; lifecycle work preempts optional work for that tick.
+
+
+## Human access review transport
+
+Source/provider access decisions remain human-authored evidence. Keep the review JSONL outside the repository and use `npm run access:review -- --input /private/access-reviews.jsonl --dry-run` before submitting the identical file without `--dry-run`. The client requires a clean exact HEAD, an exact-head Worker origin (or an agreeing explicit fallback), and `/health` reporting spec `1.3`, deployment mode `SHADOW_ACCEPTANCE` or `PRODUCTION`, and the exact local commit. It signs requests with `FARE_ACCESS_REVIEWER_KEY_ID` and the private `FARE_ACCESS_REVIEWER_SECRET`.
+
+Before every audit-evidence or review write, the client performs the exact same-source readback. Exact existing immutable state is never resent; absent state permits one bounded mutation; mismatched state fails closed. A lost mutation response is reconciled by readback before any retry, and an unresolved transport result returns `ACCESS_REVIEW_TRANSPORT_UNKNOWN`. Provider access bases are restricted to `OFFICIAL_API`, `PARTNER_CONTRACT`, `AIRLINE_DIRECT`, `MANUAL_ORACLE`, or `PUBLIC_PAGE_MONITOR`; automation never selects access, terms, privacy, or enablement decisions.

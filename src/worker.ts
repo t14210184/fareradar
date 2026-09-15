@@ -37,7 +37,7 @@ function json(data:unknown,status=200){return new Response(JSON.stringify(data),
 const worker={
   async fetch(req:Request,env:Env):Promise<Response>{
     const u=new URL(req.url);
-    if(req.method==="GET"&&u.pathname==="/health")return json({ok:true,spec:"1.3"});
+    if(req.method==="GET"&&u.pathname==="/health")return json({ok:true,spec:"1.3",mode:env.FARE_DEPLOYMENT_MODE??null,commit_sha:runtimeCommitOrNull(env.FARE_COMMIT_SHA)});
     if(req.method==="POST"&&u.pathname==="/audit/evidence"){
       const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401);
       try{
