@@ -1,0 +1,51 @@
+name: Recovery import 002a80ac
+
+on:
+  push:
+    branches: [bundle-import-002a80ac]
+
+permissions:
+  contents: write
+  issues: read
+
+jobs:
+  import-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      EXPECTED_BUNDLE_SHA: 564f89eea5ab29e3aa7440a755963ef63bd56afca0fb179f7b0f3f72a5db3a15
+      EXPECTED_HEAD: 002a80ac25752d4a79c18ef734cb4e54531fb436
+      EXPECTED_PRESTATE: 2a37ec30d3e3ac7ff2de4e2522d5653081c27aaa
+      TARGET_BRANCH: source-reconstructed
+      IMPORT_ISSUE: '1'
+    steps:
+      - name: Fetch and verify bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_json="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${IMPORT_ISSUE}")"
+          url="$(printf '%s' "$issue_json" | python3 -c 'import json,sys; b=json.load(sys.stdin)["body"]; print(next(x for x in b.splitlines() if x.startswith("https://sdmnt")))')"
+          test -n "$url"
+          curl -fL --retry 2 --retry-delay 1 --max-time 90 "$url" -o /tmp/source.bundle
+          echo "${EXPECTED_BUNDLE_SHA}  /tmp/source.bundle" | sha256sum -c -
+          mkdir -p /tmp/verify
+          git -C /tmp/verify init -q
+          git -C /tmp/verify bundle verify /tmp/source.bundle
+          git clone -q /tmp/source.bundle /tmp/source
+          test "$(git -C /tmp/source rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git -C /tmp/source status --porcelain)"
+      - name: Verify target prestate and publish exact history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          before="$(git ls-remote "$remote" "refs/heads/${TARGET_BRANCH}" | cut -f1)"
+          test "$before" = "$EXPECTED_PRESTATE"
+          git -C /tmp/source remote set-url origin "$remote"
+          git -C /tmp/source push --force-with-lease="refs/heads/${TARGET_BRANCH}:${EXPECTED_PRESTATE}" origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          after="$(git ls-remote "$remote" "refs/heads/${TARGET_BRANCH}" | cut -f1)"
+          test "$after" = "$EXPECTED_HEAD"
