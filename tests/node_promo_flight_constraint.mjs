@@ -24,4 +24,10 @@ await ingestOfferSnapshot(db,{provider_offer_id:'offer-right',query_fingerprint:
 const eligibleProjection=await projectProviderJobResults(db,'job','2026-09-15T00:04:00Z');
 const eligible=raw.prepare("select verification_state,reason,best_offer_id,best_offer_total,live_offer_count,provider_count from candidate_verification_results where queue_id='promotion:promo-flight'").get();
 const queueAfterEligible=raw.prepare("select state from candidate_priority_queue where queue_id='promotion:promo-flight'").get().state;
-console.log(JSON.stringify({mismatchProjection,mismatch,queueAfterMismatch,eligibleProjection,eligible,queueAfterEligible}));
+raw.prepare("update promotion_events set constraint_json=? where event_id='promo-flight'").run(JSON.stringify({eligible_flight_numbers:['MM627'],sales_currency:'JPY'}));
+await projectProviderJobResults(db,'job','2026-09-15T00:05:00Z');
+const currencyMismatch=raw.prepare("select verification_state,reason,best_offer_id,live_offer_count from candidate_verification_results where queue_id='promotion:promo-flight'").get();
+raw.prepare("update promotion_events set constraint_json=? where event_id='promo-flight'").run(JSON.stringify({eligible_flight_numbers:['MM627'],sales_currency:'TWD',coupon_required:true}));
+await projectProviderJobResults(db,'job','2026-09-15T00:06:00Z');
+const couponUnverified=raw.prepare("select verification_state,reason,best_offer_id,live_offer_count from candidate_verification_results where queue_id='promotion:promo-flight'").get();
+console.log(JSON.stringify({mismatchProjection,mismatch,queueAfterMismatch,eligibleProjection,eligible,queueAfterEligible,currencyMismatch,couponUnverified}));

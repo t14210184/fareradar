@@ -6,10 +6,11 @@ import { projectDirectVerifiedCandidate } from "./direct_candidate.js";
 function safe(v:string){return v.replace(/[^A-Za-z0-9._:-]/g,"_");}
 function parseJson<T>(raw:string|null|undefined,fallback:T):T{try{return raw?JSON.parse(raw) as T:fallback;}catch{return fallback;}}
 function flightToken(v:unknown){return String(v??"").toUpperCase().replace(/[^A-Z0-9]/g,"");}
-function offerMatchesEligibleFlights(structureRaw:string|null|undefined,eligibleRaw:unknown):boolean{
+function textToken(v:unknown){return String(v??"").trim().toUpperCase();}
+function offerMatchesEligibleFlights(structure:any,eligibleRaw:unknown):boolean{
   const eligible=Array.isArray(eligibleRaw)?eligibleRaw.map(flightToken).filter(Boolean):[];
   if(!eligible.length)return true;
-  const allow=new Set(eligible);const structure=parseJson<any>(structureRaw,null);
+  const allow=new Set(eligible);
   if(!structure||!Array.isArray(structure.slices)||!structure.slices.length)return false;
   let count=0;
   for(const slice of structure.slices){
@@ -25,12 +26,30 @@ function offerMatchesEligibleFlights(structureRaw:string|null|undefined,eligible
   }
   return count>0;
 }
-async function promotionEligibleFlightNumbers(db:D1Database,queueId:string):Promise<string[]>{
+type PromotionConstraintDecision={status:"PASS"|"MISMATCH"|"UNVERIFIED";reason:string};
+function evaluatePromotionOfferConstraints(offer:any,constraint:any):PromotionConstraintDecision{
+  const structure=parseJson<any>(offer?.offer_structure_json,null);
+  if(Array.isArray(constraint?.eligible_flight_numbers)&&constraint.eligible_flight_numbers.length&&!offerMatchesEligibleFlights(structure,constraint.eligible_flight_numbers))return {status:"MISMATCH",reason:"PROMOTION_FLIGHT_NUMBER_MISMATCH"};
+  if(constraint?.sales_currency&&textToken(offer?.currency)!==textToken(constraint.sales_currency))return {status:"MISMATCH",reason:"PROMOTION_SALES_CURRENCY_MISMATCH"};
+  const promoEvidence=structure?.promotion_evidence??{};
+  if(constraint?.coupon_required&&promoEvidence?.coupon_applied!==true)return {status:"UNVERIFIED",reason:"PROMOTION_COUPON_UNVERIFIED"};
+  if(constraint?.fare_brand){
+    const observed=structure?.fare_brand??promoEvidence?.fare_brand;
+    if(!observed)return {status:"UNVERIFIED",reason:"PROMOTION_FARE_BRAND_UNVERIFIED"};
+    if(textToken(observed)!==textToken(constraint.fare_brand))return {status:"MISMATCH",reason:"PROMOTION_FARE_BRAND_MISMATCH"};
+  }
+  if(constraint?.baggage_bundle){
+    const observed=structure?.baggage_bundle??promoEvidence?.baggage_bundle;
+    if(!observed)return {status:"UNVERIFIED",reason:"PROMOTION_BAGGAGE_BUNDLE_UNVERIFIED"};
+    if(textToken(observed)!==textToken(constraint.baggage_bundle))return {status:"MISMATCH",reason:"PROMOTION_BAGGAGE_BUNDLE_MISMATCH"};
+  }
+  return {status:"PASS",reason:"PROMOTION_CONSTRAINTS_SATISFIED"};
+}
+async function promotionConstraintForQueue(db:D1Database,queueId:string):Promise<any|null>{
   const q=await db.prepare("SELECT signal_type,signal_id FROM candidate_priority_queue WHERE queue_id=?").bind(queueId).first<any>();
-  if(!q||q.signal_type!=="PROMOTION")return [];
+  if(!q||q.signal_type!=="PROMOTION")return null;
   const p=await db.prepare("SELECT constraint_json FROM promotion_events WHERE event_id=?").bind(q.signal_id).first<any>();
-  const c=parseJson<any>(p?.constraint_json,{});
-  return Array.isArray(c?.eligible_flight_numbers)?c.eligible_flight_numbers.map(String).filter(Boolean):[];
+  return parseJson<any>(p?.constraint_json,{});
 }
 export async function projectProviderJobResults(db:D1Database,jobId:string,nowIso:string){
   const consumers=(await db.prepare("SELECT c.plan_id,c.queue_id,p.query_fingerprint FROM provider_job_consumers c JOIN provider_search_plans p ON p.plan_id=c.plan_id WHERE c.job_id=?").bind(jobId).all<any>()).results;
@@ -42,13 +61,16 @@ export async function projectProviderJobResults(db:D1Database,jobId:string,nowIs
       FROM candidate_offer_links l JOIN offer_snapshots o ON o.provider_offer_id=l.provider_offer_id
       WHERE l.queue_id=? AND l.query_fingerprint=? AND o.cached_or_live='LIVE'`).bind(c.queue_id,c.query_fingerprint).all<any>()).results;
     if(!linkedRaw.length)continue;
-    const eligibleFlights=await promotionEligibleFlightNumbers(db,c.queue_id);
-    const linked=eligibleFlights.length?linkedRaw.filter(o=>offerMatchesEligibleFlights(o.offer_structure_json,eligibleFlights)):linkedRaw;
+    const promoConstraint=await promotionConstraintForQueue(db,c.queue_id);
+    const decisions=promoConstraint?linkedRaw.map(o=>({offer:o,decision:evaluatePromotionOfferConstraints(o,promoConstraint)})):linkedRaw.map(o=>({offer:o,decision:{status:"PASS" as const,reason:"NOT_PROMOTION"}}));
+    const linked=decisions.filter(x=>x.decision.status==="PASS").map(x=>x.offer);
     const resultId=`verify:${safe(c.queue_id)}:${c.query_fingerprint}`;
     if(!linked.length){
+      const unverified=decisions.find(x=>x.decision.status==="UNVERIFIED");
+      const reason=unverified?"PROMOTION_CONSTRAINT_UNVERIFIED":"PROMOTION_CONSTRAINT_MISMATCH";
       await db.prepare(`INSERT INTO candidate_verification_results(result_id,queue_id,query_fingerprint,verification_state,reason,best_offer_id,best_offer_total,currency,live_offer_count,provider_count,updated_at)
         VALUES(?,?,?,?,?,NULL,NULL,NULL,0,0,?) ON CONFLICT(queue_id,query_fingerprint) DO UPDATE SET verification_state=excluded.verification_state,reason=excluded.reason,best_offer_id=NULL,best_offer_total=NULL,currency=NULL,live_offer_count=0,provider_count=0,updated_at=excluded.updated_at`)
-        .bind(resultId,c.queue_id,c.query_fingerprint,"PROBABLE","PROMOTION_CONSTRAINT_MISMATCH",nowIso).run();
+        .bind(resultId,c.queue_id,c.query_fingerprint,"PROBABLE",reason,nowIso).run();
       projected++;continue;
     }
     const verdict=verifyMultiProvider(linked.map(o=>({provider:o.provider,kind:"LIVE_OFFER" as const,price:Number(o.offer_total),query_fingerprint:o.query_fingerprint,observed_at:o.observed_at,expires_at:o.expires_at,coverage_allowed:true})),nowIso); const verificationState:"PROBABLE"|"CONFIRMED"=verdict.state==="CONFIRMED"?"CONFIRMED":"PROBABLE";
