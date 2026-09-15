@@ -1,6 +1,7 @@
 import type { D1Database } from "./types.js";
 import { ackCandidateSignal } from "./priority.js";
 import { enqueueAlertIntent } from "./outbox.js";
+import { enqueueAgencyCheckoutJob } from "./agency_checkout.js";
 function assert(c:boolean,m:string):asserts c{if(!c)throw new Error(m);}
 function sha(v:string){return /^[a-f0-9]{64}$/i.test(v);}
 function terms(v:string|null|undefined){return !!v&&v!=="RECHECK_REQUIRED"&&Number.isFinite(Date.parse(v));}
@@ -29,6 +30,7 @@ export async function completeAgencyRecheck(db:D1Database,input:AgencyRecheckInp
   if(result==="SOLD_OUT"){await db.prepare("UPDATE agency_inventory_offers SET seats_available=0,observed_at=?,state='SOLD_OUT' WHERE agency_offer_id=?").bind(input.observed_at,input.agency_offer_id).run();const state=await ackCandidateSignal(db,{queue_id:input.queue_id,worker_id:input.worker_id,ok:true},nowIso);return {state,result,idempotent:false};}
   await db.prepare("UPDATE agency_inventory_offers SET seller_verification_state='VERIFIED_READBACK',price=?,seats_available=COALESCE(?,seats_available),booking_deadline=COALESCE(?,booking_deadline),ticketing_deadline=COALESCE(?,ticketing_deadline),observed_at=?,state='SELLER_CONFIRMED' WHERE agency_offer_id=?").bind(input.price,input.seats_available??null,input.booking_deadline??null,input.ticketing_deadline??null,input.observed_at,input.agency_offer_id).run();
   const state=await ackCandidateSignal(db,{queue_id:input.queue_id,worker_id:input.worker_id,ok:true},nowIso);
+  await enqueueAgencyCheckoutJob(db,input.agency_offer_id,input.agency_id,nowIso);
   const payload={kind:"P0-PROVISIONAL",verification_state:"SELLER_CONFIRMED",actionable:false,bookable:false,subject_type:"AGENCY_CLEARANCE",agency_offer_id:input.agency_offer_id,agency_id:input.agency_id,product_id:row.product_id,price:input.price,currency:input.currency,tax_inclusion:row.tax_inclusion,baggage:row.baggage,seats_available:input.seats_available??null,booking_deadline:input.booking_deadline??null,booking_channel:row.booking_or_contact_channel,recheck_evidence_id:input.recheck_id,readback_basis:input.readback_basis};
   await enqueueAlertIntent(db,{intent_id:`agency-provisional:${input.agency_offer_id}:${input.recheck_id}`,itinerary_id:`agency:${input.agency_offer_id}`,alert_class:"DEAL",payload},nowIso);return {state,result,idempotent:false};
 }

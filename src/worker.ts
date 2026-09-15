@@ -5,6 +5,7 @@ import { scheduleDueSources, completeSourceFetch, leaseVerificationJobs, complet
 import { ingestSourceObservation, projectDomainEvents } from "./ingest.js";
 import { ingestAgencyOffer, ingestEmailEvidence } from "./partner_ingest.js";
 import { leaseAgencyRechecks, completeAgencyRecheck } from "./agency_recheck.js";
+import { leaseAgencyCheckouts, completeAgencyCheckout } from "./agency_checkout.js";
 import { ingestOfferSnapshot } from "./offers.js";
 import { recordAuditEvidence, recordSourceDiscoveryEdge } from "./audit.js";
 import { leaseCandidateSignals, ackCandidateSignal } from "./priority.js";
@@ -119,6 +120,14 @@ const worker={
     if(req.method==="POST"&&u.pathname==="/agency-rechecks/complete"){
       const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401);
       try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json({ok:true,...await completeAgencyRecheck(env.DB,payload,new Date().toISOString())},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==="AGENCY_RECHECK_IMMUTABLE_CONFLICT"?409:m.includes("LIVE_LEASE")?403:400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/agency-checkouts/lease"){
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401);
+      try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json({jobs:await leaseAgencyCheckouts(env.DB,payload,new Date().toISOString())});}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/agency-checkouts/complete"){
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401);
+      try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json({ok:true,...await completeAgencyCheckout(env.DB,payload,new Date().toISOString())},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==="AGENCY_CHECKOUT_IMMUTABLE_CONFLICT"?409:m.includes("LIVE_LEASE")?403:400);}
     }
     if(req.method==="POST"&&u.pathname==="/candidate-priority/lease"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {provider_id:string;worker_id:string;verification_type:"LIVE_REPRICE"|"SELLER_RECHECK";limit?:number}; const now=new Date().toISOString(); const ready=await providerReady(env.DB,{...p,background:true},now); if(!ready.ready)return json({error:ready.reason},409); return json({signals:await leaseCandidateSignals(env.DB,now,p.worker_id,Math.min(p.limit??5,5),90,p.verification_type)});
