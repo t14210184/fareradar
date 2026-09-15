@@ -1,12 +1,7 @@
 from __future__ import annotations
-import hashlib,hmac,json,os,socket,time,urllib.request
+import json,os,socket,time
 from . import duffel
-
-def sign_headers(secret:str,body:str):
-    ts=str(int(time.time()*1000)); sig=hmac.new(secret.encode(),f'{ts}.{body}'.encode(),hashlib.sha256).hexdigest(); return {'x-fare-timestamp':ts,'x-fare-signature':sig,'content-type':'application/json'}
-def post_json(base_url:str,path:str,payload:dict,secret:str):
-    body=json.dumps(payload,separators=(',',':'),ensure_ascii=False); req=urllib.request.Request(base_url.rstrip('/')+path,data=body.encode(),headers=sign_headers(secret,body),method='POST')
-    with urllib.request.urlopen(req,timeout=25) as r:return json.loads(r.read().decode())
+from external_worker.worker import post_json
 
 def run_once(base_url:str,secret:str,token:str|None,worker_id:str,cloud_post=post_json,duffel_transport=duffel.default_transport,duffel_detail_transport=duffel.default_get_transport,duffel_price_transport=duffel.default_transport,credential_resolver=os.environ.get):
     has_token=bool(token); card_id=credential_resolver('DUFFEL_PAYMENT_CARD_ID') if has_token else None
@@ -43,8 +38,8 @@ def run_once(base_url:str,secret:str,token:str|None,worker_id:str,cloud_post=pos
     return results
 
 if __name__=='__main__':
-    base=os.environ.get('FARE_RADAR_BASE_URL'); secret=os.environ.get('FARE_INGEST_HMAC_SECRET'); token=os.environ.get('DUFFEL_ACCESS_TOKEN'); wid=os.environ.get('FARE_PROVIDER_WORKER_ID',socket.gethostname())
-    if not base or not secret: raise SystemExit('FARE_RADAR_BASE_URL and FARE_INGEST_HMAC_SECRET required')
+    base=os.environ.get('FARE_RADAR_BASE_URL'); secret=os.environ.get('FARE_HMAC_SECRET') or os.environ.get('FARE_INGEST_HMAC_SECRET'); token=os.environ.get('DUFFEL_ACCESS_TOKEN'); wid=os.environ.get('FARE_PROVIDER_WORKER_ID',socket.gethostname())
+    if not base or not secret or (not os.environ.get('FARE_HMAC_KEY_ID') and os.environ.get('FARE_ALLOW_LEGACY_INGEST_TOKEN')!='1'): raise SystemExit('FARE_RADAR_BASE_URL, FARE_HMAC_KEY_ID and FARE_HMAC_SECRET required')
     once='--once' in os.sys.argv
     while True:
         run_once(base,secret,token,wid)

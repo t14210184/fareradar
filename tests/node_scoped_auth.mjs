@@ -1,0 +1,23 @@
+import { DatabaseSync } from 'node:sqlite';
+import fs from 'node:fs';
+import worker from '../dist/worker.js';
+import { cleanupExpiredNonces } from '../dist/auth.js';
+import { installKey, authEnv, signedRequest } from './scoped_auth_helper.mjs';
+class S{constructor(s){this.s=s;this.a=[]}bind(...a){this.a=a;return this}async run(){return{success:true,meta:this.s.run(...this.a)}}async first(){return this.s.get(...this.a)??null}async all(){return{results:this.s.all(...this.a)}}}
+class D{constructor(x){this.x=x}prepare(q){return new S(this.x.prepare(q))}async batch(a){const out=[];this.x.exec('BEGIN IMMEDIATE');try{for(const s of a)out.push(await s.run());this.x.exec('COMMIT');return out}catch(e){this.x.exec('ROLLBACK');throw e}}}
+const raw=new DatabaseSync(':memory:');for(const f of fs.readdirSync(new URL('../migrations/',import.meta.url)).filter(x=>x.endsWith('.sql')).sort())raw.exec(fs.readFileSync(new URL(`../migrations/${f}`,import.meta.url),'utf8'));const db=new D(raw);
+const secret='scoped-secret-0123456789'; const env=authEnv(db,secret);
+installKey(raw,{keyId:'audit-key',allowedPaths:['/audit/evidence']});
+const auditBody=JSON.stringify({evidence_id:'auth-e1',gate_id:'PG00',spec_version:'1.3',test_report_hash:'a'.repeat(64),created_at:'2026-09-15T00:00:00Z'});
+const nonce='nonce-replay-abcdefghijkl';
+const req1=await signedRequest('https://fare.example/audit/evidence',auditBody,{keyId:'audit-key',secret,nonce}); const r1=await worker.fetch(req1,env);
+const req2=await signedRequest('https://fare.example/audit/evidence',auditBody,{keyId:'audit-key',secret,nonce}); const replay=await worker.fetch(req2,env);
+const wrongBodyReq=await signedRequest('https://fare.example/audit/evidence',auditBody,{keyId:'audit-key',secret,nonce:'nonce-body-abcdefghijkl'}); const h=Object.fromEntries(wrongBodyReq.headers.entries()); const wrongBody=new Request('https://fare.example/audit/evidence',{method:'POST',headers:h,body:auditBody+' '}); const wrongBodyRes=await worker.fetch(wrongBody,env);
+const wrongPathReq=await signedRequest('https://fare.example/profiles/upsert','{}',{keyId:'audit-key',secret,nonce:'nonce-path-abcdefghijkl'}); const wrongPathRes=await worker.fetch(wrongPathReq,env);
+const staleReq=await signedRequest('https://fare.example/audit/evidence',auditBody,{keyId:'audit-key',secret,nonce:'nonce-stale-abcdefghijkl',ts:String(Date.now()-600001)}); const staleRes=await worker.fetch(staleReq,env);
+installKey(raw,{keyId:'disabled-key',allowedPaths:['/audit/evidence'],enabled:0}); const disabledRes=await worker.fetch(await signedRequest('https://fare.example/audit/evidence',auditBody,{keyId:'disabled-key',secret}),env);
+installKey(raw,{keyId:'expired-key',allowedPaths:['/audit/evidence'],expiresAt:'2000-01-01T00:00:00Z'}); const expiredRes=await worker.fetch(await signedRequest('https://fare.example/audit/evidence',auditBody,{keyId:'expired-key',secret}),env);
+installKey(raw,{keyId:'agency-key',role:'AGENCY_PARTNER',agencyId:'agency-1',allowedPaths:['/ingest/agency']}); const agencyMismatch=await worker.fetch(await signedRequest('https://fare.example/ingest/agency',JSON.stringify({agency_id:'agency-2'}),{keyId:'agency-key',secret}),env);
+installKey(raw,{keyId:'source-key',role:'SOURCE_WORKER',sourceId:'source-1',allowedPaths:['/ingest']}); const sourceMismatch=await worker.fetch(await signedRequest('https://fare.example/ingest',JSON.stringify({source_id:'source-2'}),{keyId:'source-key',secret}),env); const sourceCannotEmail=await worker.fetch(await signedRequest('https://fare.example/ingest/email',JSON.stringify({source_id:'source-1'}),{keyId:'source-key',secret}),env);
+raw.prepare("insert into used_request_nonces(key_id,nonce,request_sha256,used_at,expires_at) values('audit-key','nonce-expired-cleanup-abc','b','2026-09-14T00:00:00Z','2026-09-14T00:01:00Z')").run(); await cleanupExpiredNonces(db,'2026-09-15T00:00:00Z'); const expiredNonceCount=raw.prepare("select count(*) n from used_request_nonces where nonce='nonce-expired-cleanup-abc'").get().n;
+console.log(JSON.stringify({ok:r1.status,replay:replay.status,wrong_body:wrongBodyRes.status,wrong_path:wrongPathRes.status,stale:staleRes.status,disabled:disabledRes.status,expired:expiredRes.status,agency_mismatch:agencyMismatch.status,source_mismatch:sourceMismatch.status,source_cannot_email:sourceCannotEmail.status,nonces:raw.prepare('select count(*) n from used_request_nonces').get().n,expired_nonce_count:expiredNonceCount,audits:raw.prepare('select count(*) n from audit_evidence').get().n}));

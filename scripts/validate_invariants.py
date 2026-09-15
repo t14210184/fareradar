@@ -37,7 +37,9 @@ required={
 'four_leg_cycles':{'cycle_id','itinerary_id','state','broken_reason','created_at','updated_at'},
 'carrier_ticketing_policies':{'policy_id','carrier','policy_type','consequence','terms_url','article_or_clause','observed_at','expires_at','source_snapshot_hash','status'},
 'connection_buffer_policies':{'policy_id','airport','airport_base_buffer','immigration_margin','baggage_reclaim_margin','terminal_transfer_margin','checkin_cutoff_margin','security_margin','delay_margin','buffer_confidence','authority','observed_at','expires_at','raw_sha256'},
-'airport_change_policies':{'policy_id','from_airport','to_airport','ground_transfer_minutes','ground_contingency_minutes','authority','observed_at','expires_at','raw_sha256'} }
+'airport_change_policies':{'policy_id','from_airport','to_airport','ground_transfer_minutes','ground_contingency_minutes','authority','observed_at','expires_at','raw_sha256'},
+'ingest_auth_keys':{'key_id','role','source_id','agency_id','secret_slot','allowed_paths_json','enabled','not_before','expires_at'},
+'used_request_nonces':{'key_id','nonce','request_sha256','used_at','expires_at'} }
 for table, cols in required.items():
     got={r[1] for r in db.execute(f'pragma table_info({table})')}
     missing=cols-got

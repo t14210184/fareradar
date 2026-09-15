@@ -27,8 +27,8 @@ def run_once(base_url:str,secret:str,worker_id:str,deal_url:str|None,admin_url:s
 
 if __name__=='__main__':
     import socket,sys
-    base=os.environ.get('FARE_RADAR_BASE_URL'); secret=os.environ.get('FARE_INGEST_HMAC_SECRET'); wid=os.environ.get('FARE_NOTIFIER_ID',socket.gethostname()+'-notifier')
-    if not base or not secret: raise SystemExit('FARE_RADAR_BASE_URL and FARE_INGEST_HMAC_SECRET required')
+    base=os.environ.get('FARE_RADAR_BASE_URL'); secret=os.environ.get('FARE_HMAC_SECRET') or os.environ.get('FARE_INGEST_HMAC_SECRET'); wid=os.environ.get('FARE_NOTIFIER_ID',socket.gethostname()+'-notifier')
+    if not base or not secret or (not os.environ.get('FARE_HMAC_KEY_ID') and os.environ.get('FARE_ALLOW_LEGACY_INGEST_TOKEN')!='1'): raise SystemExit('FARE_RADAR_BASE_URL, FARE_HMAC_KEY_ID and FARE_HMAC_SECRET required')
     deal=os.environ.get('FARE_DEAL_WEBHOOK_URL'); admin=os.environ.get('FARE_ADMIN_WEBHOOK_URL'); once='--once' in sys.argv
     while True:
         run_once(base,secret,wid,deal,admin)

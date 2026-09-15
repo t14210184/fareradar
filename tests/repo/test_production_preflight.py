@@ -13,3 +13,7 @@ def test_local_env_cannot_fake_provider_readback(monkeypatch):
     assert 'PRODUCTION_SECRETS_READBACK_MISSING' in got['blockers']
 def test_placeholder_d1_blocks(): assert pf.d1_id() in pf.PLACEHOLDERS
 def test_local_gate_evidence_can_be_ready(): assert pf.code_ready() is True
+def test_legacy_ingest_auth_is_production_blocker(monkeypatch):
+    monkeypatch.setenv('ALLOW_LEGACY_INGEST_TOKEN','1')
+    got=pf.evaluate(remote='https://github.com/acme/fare-radar.git')
+    assert 'LEGACY_INGEST_AUTH_ENABLED' in got['blockers']

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib,hmac,ipaddress,json,re,socket,time,urllib.parse,urllib.request,urllib.error
+import hashlib,hmac,ipaddress,json,os,re,secrets,socket,time,urllib.parse,urllib.request,urllib.error
 MAX_BODY=2_000_000
 ALLOWED_MIME=('text/','application/json','application/xml','application/rss+xml','application/atom+xml')
 def _public_ip(ip:str)->bool:
@@ -21,8 +21,18 @@ def structured_signal(text:str,source_id:str):
     keywords=[k for k in ['特價','促銷','清艙','清倉','限時','flash sale','sale'] if k.lower() in text.lower()]
     if not (routes or prices or keywords): return None
     return {'extraction_type':'PROMOTION_SIGNAL','structured_payload':{'market':'TW','routes':sorted(set(routes)),'prices':prices,'promo_code':m.group(1).upper() if m else None,'keywords':keywords,'source_id':source_id}}
-def sign_headers(secret:str,body:str):
-    ts=str(int(time.time()*1000)); sig=hmac.new(secret.encode(),f'{ts}.{body}'.encode(),hashlib.sha256).hexdigest(); return {'x-fare-timestamp':ts,'x-fare-signature':sig,'content-type':'application/json'}
+def sign_headers(secret:str,body:str,path:str,method:str='POST',key_id:str|None=None,nonce:str|None=None,ts:str|None=None):
+    ts=ts or str(int(time.time()*1000)); key_id=key_id or os.environ.get('FARE_HMAC_KEY_ID')
+    if not key_id:
+        if os.environ.get('FARE_ALLOW_LEGACY_INGEST_TOKEN')=='1':
+            sig=hmac.new(secret.encode(),f'{ts}.{body}'.encode(),hashlib.sha256).hexdigest()
+            return {'x-fare-timestamp':ts,'x-fare-signature':sig,'content-type':'application/json'}
+        raise ValueError('FARE_HMAC_KEY_ID_REQUIRED')
+    nonce=nonce or secrets.token_urlsafe(24)
+    body_hash=hashlib.sha256(body.encode()).hexdigest()
+    canonical='\n'.join([key_id,ts,nonce,method.upper(),path,body_hash])
+    sig=hmac.new(secret.encode(),canonical.encode(),hashlib.sha256).hexdigest()
+    return {'x-fare-key-id':key_id,'x-fare-timestamp':ts,'x-fare-nonce':nonce,'x-fare-signature':sig,'content-type':'application/json'}
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs): return None
 def fetch(url:str,etag:str|None=None,last_modified:str|None=None,max_redirects=5):
@@ -50,7 +60,7 @@ def fetch(url:str,etag:str|None=None,last_modified:str|None=None,max_redirects=5
 
 def post_json(base_url:str,path:str,payload:dict,secret:str):
     body=json.dumps(payload,separators=(',',':'),ensure_ascii=False)
-    req=urllib.request.Request(base_url.rstrip('/')+path,data=body.encode(),headers=sign_headers(secret,body),method='POST')
+    req=urllib.request.Request(base_url.rstrip('/')+path,data=body.encode(),headers=sign_headers(secret,body,path,'POST'),method='POST')
     with urllib.request.urlopen(req,timeout=20) as r:
         return json.loads(r.read().decode())
 
@@ -78,9 +88,9 @@ def run_once(base_url:str,secret:str,worker_id:str):
     return results
 
 if __name__=='__main__':
-    import os,sys
-    base=os.environ.get('FARE_RADAR_BASE_URL'); secret=os.environ.get('FARE_INGEST_HMAC_SECRET'); wid=os.environ.get('FARE_WORKER_ID',socket.gethostname())
-    if not base or not secret: raise SystemExit('FARE_RADAR_BASE_URL and FARE_INGEST_HMAC_SECRET required')
+    import sys
+    base=os.environ.get('FARE_RADAR_BASE_URL'); secret=os.environ.get('FARE_HMAC_SECRET') or os.environ.get('FARE_INGEST_HMAC_SECRET'); wid=os.environ.get('FARE_WORKER_ID',socket.gethostname())
+    if not base or not secret or (not os.environ.get('FARE_HMAC_KEY_ID') and os.environ.get('FARE_ALLOW_LEGACY_INGEST_TOKEN')!='1'): raise SystemExit('FARE_RADAR_BASE_URL, FARE_HMAC_KEY_ID and FARE_HMAC_SECRET required')
     once='--once' in sys.argv
     while True:
         run_once(base,secret,wid)
