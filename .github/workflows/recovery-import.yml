@@ -1,4 +1,4 @@
-name: Recovery import 960cb406
+name: Recovery import 32d8c163
 
 on:
   push:
@@ -13,11 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      EXPECTED_BUNDLE_SHA: 636cd5c1a8a8b07fff479324f167169729f83a912f8db6427aa1c2830f251efc
-      EXPECTED_HEAD: 960cb406a1a2466ae8c7fe6eb1acc47337e4f1b7
-      EXPECTED_PRESTATE: 7465d6df28650da47369251849373a6a425f963b
+      EXPECTED_BUNDLE_SHA: 16f00f91596d3aed5ab2ed4e3d5b5c11ba793ee5f4ef280677d9a61be36a469a
+      EXPECTED_HEAD: 32d8c16322f18fdbb339334257c4209d779f286e
+      EXPECTED_PRESTATE: 960cb406a1a2466ae8c7fe6eb1acc47337e4f1b7
       TARGET_BRANCH: source-reconstructed
-      IMPORT_ISSUE: '3'
+      IMPORT_ISSUE: '4'
     steps:
       - name: Fetch and verify bundle
         env:
