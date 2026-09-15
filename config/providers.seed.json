@@ -1,4 +1,20 @@
 [
-  {"provider_id":"duffel","access_basis":"OFFICIAL_API","terms_snapshot_at":"RECHECK_REQUIRED","rate_policy":"TARGETED_ONLY","look_to_book_budget":1500,"kill_switch_state":"ON","owner":"provider"},
-  {"provider_id":"amadeus_self_service","access_basis":"OFFICIAL_API","terms_snapshot_at":"RECHECK_REQUIRED","rate_policy":"NON_LCC_TARGETED_ONLY","look_to_book_budget":null,"kill_switch_state":"ON","owner":"provider"}
+  {
+    "provider_id": "duffel",
+    "access_basis": "OFFICIAL_API",
+    "terms_snapshot_at": "RECHECK_REQUIRED",
+    "rate_policy": "TARGETED_ONLY",
+    "look_to_book_budget": 1500,
+    "kill_switch_state": "CLEAR",
+    "owner": "provider"
+  },
+  {
+    "provider_id": "amadeus_self_service",
+    "access_basis": "OFFICIAL_API",
+    "terms_snapshot_at": "RECHECK_REQUIRED",
+    "rate_policy": "NON_LCC_TARGETED_ONLY",
+    "look_to_book_budget": null,
+    "kill_switch_state": "CLEAR",
+    "owner": "provider"
+  }
 ]

@@ -1,8 +1,11 @@
 import type { CandidatePlanInput, D1Database } from "./types.js";
 import { persistCandidatePlan } from "./intake.js";
 import { enqueueAlertIntent, projectAlertIntents, leaseNotifications, ackNotification, claimDomainEvents, ackDomainEvent } from "./outbox.js";
-import { scheduleDueSources, completeSourceFetch, leaseVerificationJobs } from "./scheduler.js";
+import { scheduleDueSources, completeSourceFetch, leaseVerificationJobs, completeVerificationJob } from "./scheduler.js";
 import { ingestSourceObservation, projectDomainEvents } from "./ingest.js";
+import { ingestAgencyOffer, ingestEmailEvidence } from "./partner_ingest.js";
+import { ingestOfferSnapshot } from "./offers.js";
+import { recordAuditEvidence, recordSourceDiscoveryEdge } from "./audit.js";
 
 export interface Env { DB:D1Database; INGEST_HMAC_SECRET:string; }
 const enc=new TextEncoder();
@@ -16,9 +19,29 @@ const worker={
   async fetch(req:Request,env:Env):Promise<Response>{
     const u=new URL(req.url);
     if(req.method==="GET"&&u.pathname==="/health")return json({ok:true,spec:"1.3"});
+    if(req.method==="POST"&&u.pathname==="/audit/evidence"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await recordAuditEvidence(env.DB,JSON.parse(body))},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==='AUDIT_EVIDENCE_CONFLICT'?409:400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/source-discovery/edge"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json(await recordSourceDiscoveryEdge(env.DB,JSON.parse(body)),202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/offers/ingest"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await ingestOfferSnapshot(env.DB,JSON.parse(body))},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==='OFFER_ID_CONFLICT'?409:400);}
+    }
     if(req.method==="POST"&&u.pathname==="/candidate-plan/intake"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
       try{const payload=JSON.parse(body) as CandidatePlanInput;const r=await persistCandidatePlan(env.DB,payload);return json({ok:true,...r},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==="IDEMPOTENCY_CONFLICT"?409:400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/ingest/agency"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await ingestAgencyOffer(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/ingest/email"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await ingestEmailEvidence(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/ingest"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
@@ -44,7 +67,7 @@ const worker={
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {worker_id:string;limit?:number}; return json({jobs:await leaseVerificationJobs(env.DB,new Date().toISOString(),p.worker_id,Math.min(p.limit??5,5))});
     }
     if(req.method==="POST"&&u.pathname==="/verification-jobs/complete"){
-      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {job_id:string;source_id:string;success:boolean;duplicate?:boolean;schema_drift?:boolean;etag?:string;last_modified?:string;content_sha256?:string}; const now=new Date().toISOString(); const health=await completeSourceFetch(env.DB,p,now); await env.DB.prepare("UPDATE verification_jobs SET state=?,claimed_by=NULL,lease_until=NULL,last_error=? WHERE job_id=?").bind(p.success?'DONE':'FAILED',p.success?null:'FETCH_FAILED',p.job_id).run(); return json({ok:true,health});
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body) as {job_id:string;source_id:string;success:boolean;duplicate?:boolean;schema_drift?:boolean;etag?:string;last_modified?:string;content_sha256?:string;error?:string}; const now=new Date().toISOString(); const health=await completeSourceFetch(env.DB,p,now); const state=await completeVerificationJob(env.DB,p,now); return json({ok:true,health,state});
     }
     return json({error:"NOT_FOUND"},404);
   }

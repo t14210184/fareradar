@@ -1,0 +1,11 @@
+import { DatabaseSync } from 'node:sqlite'; import fs from 'node:fs'; import { ingestOfferSnapshot } from '../dist/offers.js';
+class Stmt { constructor(s){this.s=s;this.args=[]} bind(...v){this.args=v;return this} async run(){return {success:true,meta:this.s.run(...this.args)}} async first(){return this.s.get(...this.args)??null} async all(){return {results:this.s.all(...this.args)}} }
+class DB { constructor(db){this.db=db} prepare(sql){return new Stmt(this.db.prepare(sql))} async batch(stmts){this.db.exec('BEGIN IMMEDIATE');try{const o=[];for(const s of stmts)o.push(await s.run());this.db.exec('COMMIT');return o}catch(e){this.db.exec('ROLLBACK');throw e}} }
+const raw=new DatabaseSync(':memory:'); for(const f of fs.readdirSync(new URL('../migrations/',import.meta.url)).filter(x=>x.endsWith('.sql')).sort()) raw.exec(fs.readFileSync(new URL(`../migrations/${f}`,import.meta.url),'utf8')); const db=new DB(raw);
+const add=(id,terms='2026-09-01T00:00:00Z',kill='CLEAR')=>raw.prepare('insert into provider_access_registry(provider_id,access_basis,terms_snapshot_at,rate_policy,look_to_book_budget,kill_switch_state,owner) values(?,?,?,?,?,?,?)').run(id,'OFFICIAL_API',terms,'TARGETED_ONLY',1000,kill,'test'); add('p1'); add('amadeus_self_service'); add('stale','RECHECK_REQUIRED');
+const base={provider_offer_id:'o1',query_fingerprint:'q1',provider:'p1',currency:'TWD',observed_at:'2026-09-15T00:00:00Z',expires_at:'2026-09-15T12:00:00Z',raw_sha256:'a'.repeat(64),offer_total:5000,fare_freshness:'LIVE',cached_or_live:'LIVE'};
+const first=await ingestOfferSnapshot(db,base); const second=await ingestOfferSnapshot(db,base);
+let conflict=false; try{await ingestOfferSnapshot(db,{...base,raw_sha256:'b'.repeat(64)})}catch(e){conflict=String(e).includes('OFFER_ID_CONFLICT')}
+let lcc=false; try{await ingestOfferSnapshot(db,{...base,provider_offer_id:'o2',provider:'amadeus_self_service',raw_sha256:'c'.repeat(64),contains_lcc:true})}catch(e){lcc=String(e).includes('AMADEUS_LCC_EXCLUDED')}
+let stale=false; try{await ingestOfferSnapshot(db,{...base,provider_offer_id:'o3',provider:'stale',raw_sha256:'d'.repeat(64)})}catch(e){stale=String(e).includes('PROVIDER_ACCESS_NOT_READY')}
+console.log(JSON.stringify({first,second,conflict,lcc,stale,count:raw.prepare('select count(*) n from offer_snapshots').get().n}));

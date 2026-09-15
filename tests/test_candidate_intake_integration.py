@@ -9,3 +9,4 @@ def test_atomic_candidate_intake_idempotent(tmp_path):
     assert got['r1']['statements'] <= 48
     assert got['counts']=={'itinerary_candidates':1,'candidate_plan_intakes':1,'ticket_components':2,'transfer_boundaries':1,'cost_components':2,'readiness_facets':7,'document_requirements':1,'four_leg_liabilities':0}
     assert got['conflict'] is True
+    assert got['missingRefBlocked'] is True

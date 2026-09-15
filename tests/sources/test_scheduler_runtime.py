@@ -7,3 +7,4 @@ def test_registry_to_job_to_health_runtime():
     assert x['c']['inserted']==1 and x['job_count']==2
     assert x['s2_jobs']==0
     assert x['fetch']['etag']=='"a"' and x['fetch']['content_sha256']=='a'*64
+    assert x['health_row']['window_start'].startswith('2026-09-15') and x['health_row']['recommended_schedule_action']=='KEEP'

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { enqueueAlertIntent, projectAlertIntents, leaseNotifications, ackNotification, claimDomainEvents, ackDomainEvent } from '../dist/outbox.js';
 class Stmt { constructor(s){this.s=s;this.args=[]} bind(...v){this.args=v;return this} async run(){return {success:true,meta:this.s.run(...this.args)}} async first(){return this.s.get(...this.args)??null} async all(){return {results:this.s.all(...this.args)}} }
 class DB { constructor(db){this.db=db} prepare(sql){return new Stmt(this.db.prepare(sql))} async batch(stmts){this.db.exec('BEGIN IMMEDIATE');try{const o=[];for(const s of stmts)o.push(await s.run());this.db.exec('COMMIT');return o}catch(e){this.db.exec('ROLLBACK');throw e}} }
-const raw=new DatabaseSync(':memory:'); for(const f of ['0001_core.sql','0002_registry_contract.sql','0003_outbox_recovery.sql']) raw.exec(fs.readFileSync(new URL(`../migrations/${f}`,import.meta.url),'utf8')); const db=new DB(raw);
+const raw=new DatabaseSync(':memory:'); for(const f of fs.readdirSync(new URL('../migrations/',import.meta.url)).filter(x=>x.endsWith('.sql')).sort()) raw.exec(fs.readFileSync(new URL(`../migrations/${f}`,import.meta.url),'utf8')); const db=new DB(raw);
 const t0='2026-09-15T00:00:00.000Z';
 await enqueueAlertIntent(db,{intent_id:'deal-1',itinerary_id:'itin-1',alert_class:'DEAL',payload:{x:1}},t0);
 await projectAlertIntents(db,t0); await projectAlertIntents(db,t0);

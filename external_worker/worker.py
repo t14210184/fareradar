@@ -47,3 +47,42 @@ def fetch(url:str,etag:str|None=None,last_modified:str|None=None,max_redirects=5
         text=body.decode('utf-8','replace')
         return {'status':200,'url':current,'body':text,'content_sha256':hashlib.sha256(body).hexdigest(),'etag':r.headers.get('ETag'),'last_modified':r.headers.get('Last-Modified'),'content_type':ctype}
     raise ValueError('TOO_MANY_REDIRECTS')
+
+def post_json(base_url:str,path:str,payload:dict,secret:str):
+    body=json.dumps(payload,separators=(',',':'),ensure_ascii=False)
+    req=urllib.request.Request(base_url.rstrip('/')+path,data=body.encode(),headers=sign_headers(secret,body),method='POST')
+    with urllib.request.urlopen(req,timeout=20) as r:
+        return json.loads(r.read().decode())
+
+def observation_id(source_id:str,url:str,content_sha256:str):
+    return hashlib.sha256(f'{source_id}|{url}|{content_sha256}'.encode()).hexdigest()
+
+def run_once(base_url:str,secret:str,worker_id:str):
+    leased=post_json(base_url,'/verification-jobs/lease',{'worker_id':worker_id,'limit':5},secret).get('jobs',[])
+    results=[]
+    for job in leased:
+        payload=json.loads(job['payload_json']); source_id=payload['source_id']; url=payload['url']
+        try:
+            got=fetch(url)
+            if got.get('not_modified'):
+                post_json(base_url,'/verification-jobs/complete',{'job_id':job['job_id'],'source_id':source_id,'success':True,'duplicate':True},secret); results.append({'job_id':job['job_id'],'status':'NOT_MODIFIED'}); continue
+            signal=structured_signal(got['body'],source_id)
+            obs={'observation_id':observation_id(source_id,got['url'],got['content_sha256']),'source_id':source_id,'observed_at':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'canonical_url':got['url'],'content_sha256':got['content_sha256'],'parser_version':'external-worker-1','privacy_class':'PUBLIC'}
+            if signal: obs.update(signal)
+            post_json(base_url,'/ingest',obs,secret)
+            post_json(base_url,'/verification-jobs/complete',{'job_id':job['job_id'],'source_id':source_id,'success':True,'etag':got.get('etag'),'last_modified':got.get('last_modified'),'content_sha256':got['content_sha256']},secret)
+            results.append({'job_id':job['job_id'],'status':'DONE'})
+        except Exception as e:
+            try: post_json(base_url,'/verification-jobs/complete',{'job_id':job['job_id'],'source_id':source_id,'success':False,'error':type(e).__name__+':'+str(e)[:300],'schema_drift':str(e)=='MIME_BLOCKED'},secret)
+            finally: results.append({'job_id':job['job_id'],'status':'FAILED','error':str(e)})
+    return results
+
+if __name__=='__main__':
+    import os,sys
+    base=os.environ.get('FARE_RADAR_BASE_URL'); secret=os.environ.get('FARE_INGEST_HMAC_SECRET'); wid=os.environ.get('FARE_WORKER_ID',socket.gethostname())
+    if not base or not secret: raise SystemExit('FARE_RADAR_BASE_URL and FARE_INGEST_HMAC_SECRET required')
+    once='--once' in sys.argv
+    while True:
+        run_once(base,secret,wid)
+        if once: break
+        time.sleep(30)
