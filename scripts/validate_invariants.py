@@ -5,7 +5,7 @@ db=sqlite3.connect(':memory:')
 for p in sorted((ROOT/'migrations').glob('*.sql')): db.executescript(p.read_text())
 required={
 'itinerary_candidates':{'itinerary_id','strategy_type','verification_state'},
-'offer_snapshots':{'provider_offer_id','query_fingerprint','provider','raw_sha256','offer_total','fare_freshness','cached_or_live'},
+'offer_snapshots':{'provider_offer_id','query_fingerprint','provider','raw_sha256','offer_total','fare_freshness','cached_or_live','offer_structure_json'},
 'ticket_components':{'ticket_id','pnr_group','connection_protection_type'},
 'transfer_boundaries':{'from_ticket_id','to_ticket_id','scheduled_buffer_minutes','required_buffer_minutes','evidence_id'},
 'cost_components':{'inclusion_state','source_offer_id','policy_evidence_id','dedupe_key','paid_state','refundable'},

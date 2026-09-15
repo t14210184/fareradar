@@ -30,6 +30,20 @@ def search(query:dict,token:str,transport=default_transport)->dict:
     if not isinstance(offers,list): raise ValueError('DUFFEL_RESPONSE_INVALID')
     return {'offer_request_id':data.get('id'),'offers':offers}
 
+
+def canonical_structure(offer:dict):
+    slices=[]
+    for sl in offer.get('slices') or []:
+        segs=[]
+        for sg in sl.get('segments') or []:
+            origin=(sg.get('origin') or {}).get('iata_code'); dest=(sg.get('destination') or {}).get('iata_code')
+            dep=sg.get('departing_at'); arr=sg.get('arriving_at')
+            if not all((origin,dest,dep,arr)): continue
+            marketing=(sg.get('marketing_carrier') or {}).get('iata_code'); operating=(sg.get('operating_carrier') or {}).get('iata_code')
+            segs.append({'origin':origin,'destination':dest,'departing_at':dep,'arriving_at':arr,'marketing_carrier':marketing,'operating_carrier':operating,'flight_number':sg.get('marketing_carrier_flight_number')})
+        slices.append({'segments':segs})
+    return {'slices':slices} if slices else None
+
 def normalize_offer(offer:dict,query:dict,query_fingerprint:str,job_id:str,observed_at:str)->dict:
     oid=offer.get('id'); cur=offer.get('total_currency'); amount=offer.get('total_amount')
     if not oid or not cur or amount is None: raise ValueError('DUFFEL_OFFER_INVALID')
@@ -40,5 +54,5 @@ def normalize_offer(offer:dict,query:dict,query_fingerprint:str,job_id:str,obser
       'passenger_mix':json.dumps(query.get('passengers',[]),separators=(',',':')),
       'baggage_query':json.dumps(query.get('baggage_query'),separators=(',',':')) if query.get('baggage_query') is not None else None,
       'observed_at':observed_at,'expires_at':offer.get('expires_at'),'raw_sha256':hashlib.sha256(raw.encode()).hexdigest(),
-      'source_snapshot_id':job_id,'offer_total':float(amount),'fare_freshness':'LIVE','cached_or_live':'LIVE'
+      'source_snapshot_id':job_id,'offer_total':float(amount),'fare_freshness':'LIVE','cached_or_live':'LIVE','offer_structure':canonical_structure(offer)
     }

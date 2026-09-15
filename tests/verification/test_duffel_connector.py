@@ -8,7 +8,7 @@ def test_duffel_v2_request_and_normalization():
     seen={}
     def transport(url,headers,body):
         seen.update(url=url,headers=headers,payload=json.loads(body))
-        return {'data':{'id':'orq_1','offers':[{'id':'off_1','total_currency':'TWD','total_amount':'5999.00','expires_at':'2026-09-15T01:00:00Z'}]}}
+        return {'data':{'id':'orq_1','offers':[{'id':'off_1','total_currency':'TWD','total_amount':'5999.00','expires_at':'2026-09-15T01:00:00Z','slices':[{'segments':[{'origin':{'iata_code':'TPE'},'destination':{'iata_code':'KIX'},'departing_at':'2026-11-03T01:00:00Z','arriving_at':'2026-11-03T03:30:00Z','marketing_carrier':{'iata_code':'MM'},'operating_carrier':{'iata_code':'MM'},'marketing_carrier_flight_number':'001'}]}]}]}}
     out=duffel.search(QUERY,'token-x',transport)
     assert seen['url'].startswith('https://api.duffel.com/air/offer_requests?return_offers=true')
     assert seen['headers']['Duffel-Version']=='v2' and seen['headers']['Authorization']=='Bearer token-x'
@@ -16,6 +16,7 @@ def test_duffel_v2_request_and_normalization():
     snap=duffel.normalize_offer(out['offers'][0],QUERY,'qfp','job1','2026-09-15T00:00:00Z')
     assert snap['provider']=='duffel' and snap['provider_offer_id']=='off_1' and snap['offer_total']==5999.0
     assert snap['cached_or_live']=='LIVE' and len(snap['raw_sha256'])==64
+    assert snap['offer_structure']['slices'][0]['segments'][0]['origin']=='TPE' and snap['offer_structure']['slices'][0]['segments'][0]['marketing_carrier']=='MM'
 
 def test_provider_worker_heartbeat_no_credentials_does_not_lease():
     calls=[]
