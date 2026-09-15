@@ -1,31 +1,61 @@
 import type { D1Database } from "./types.js";
 function assert(c:boolean,m:string):asserts c{if(!c)throw new Error(m);}
 function fresh(v:string|null|undefined,now:string){return !!v&&Number.isFinite(Date.parse(v))&&Date.parse(v)>Date.parse(now);}
+function minExpiry(...values:(string|null|undefined)[]){const xs=values.filter((x):x is string=>!!x&&Number.isFinite(Date.parse(x))).map(Date.parse);return xs.length?new Date(Math.min(...xs)).toISOString():null;}
+
 export interface ConnectionBufferPolicyInput {policy_id:string;airport:string;airport_base_buffer:number;immigration_margin:number;baggage_reclaim_margin:number;terminal_transfer_margin:number;checkin_cutoff_margin:number;security_margin:number;delay_margin:number;buffer_confidence:"LOW"|"MEDIUM"|"HIGH";authority:string;observed_at:string;expires_at:string;raw_sha256:string;}
+export interface AirportChangePolicyInput {policy_id:string;from_airport:string;to_airport:string;ground_transfer_minutes:number;ground_contingency_minutes:number;authority:string;observed_at:string;expires_at:string;raw_sha256:string;}
+
 export async function ingestConnectionBufferPolicy(db:D1Database,p:ConnectionBufferPolicyInput,nowIso:string){
-  assert(!!p.policy_id&&!!p.airport&&!!p.authority,"BUFFER_POLICY_IDENTITY_REQUIRED");for(const k of ["airport_base_buffer","immigration_margin","baggage_reclaim_margin","terminal_transfer_margin","checkin_cutoff_margin","security_margin","delay_margin"] as const)assert(Number.isInteger(p[k])&&p[k]>=0,"BUFFER_POLICY_MARGIN_INVALID");assert(["LOW","MEDIUM","HIGH"].includes(p.buffer_confidence),"BUFFER_CONFIDENCE_INVALID");assert(fresh(p.expires_at,p.observed_at),"BUFFER_POLICY_TIME_INVALID");assert(/^[a-f0-9]{64}$/i.test(p.raw_sha256),"BUFFER_POLICY_HASH_INVALID");
+  assert(!!p.policy_id&&/^[A-Z]{3}$/.test(p.airport)&&!!p.authority,"BUFFER_POLICY_IDENTITY_REQUIRED");for(const k of ["airport_base_buffer","immigration_margin","baggage_reclaim_margin","terminal_transfer_margin","checkin_cutoff_margin","security_margin","delay_margin"] as const)assert(Number.isInteger(p[k])&&p[k]>=0,"BUFFER_POLICY_MARGIN_INVALID");assert(["LOW","MEDIUM","HIGH"].includes(p.buffer_confidence),"BUFFER_CONFIDENCE_INVALID");assert(fresh(p.expires_at,p.observed_at),"BUFFER_POLICY_TIME_INVALID");assert(/^[a-f0-9]{64}$/i.test(p.raw_sha256),"BUFFER_POLICY_HASH_INVALID");
   const prior=await db.prepare("SELECT raw_sha256 FROM connection_buffer_policies WHERE policy_id=?").bind(p.policy_id).first<any>();if(prior){if(prior.raw_sha256!==p.raw_sha256)throw new Error("BUFFER_POLICY_IMMUTABLE_CONFLICT");return {policy_id:p.policy_id,idempotent:true};}
   await db.prepare("INSERT INTO connection_buffer_policies(policy_id,airport,airport_base_buffer,immigration_margin,baggage_reclaim_margin,terminal_transfer_margin,checkin_cutoff_margin,security_margin,delay_margin,buffer_confidence,authority,observed_at,expires_at,raw_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(p.policy_id,p.airport,p.airport_base_buffer,p.immigration_margin,p.baggage_reclaim_margin,p.terminal_transfer_margin,p.checkin_cutoff_margin,p.security_margin,p.delay_margin,p.buffer_confidence,p.authority,p.observed_at,p.expires_at,p.raw_sha256,nowIso).run();return {policy_id:p.policy_id,idempotent:false};
 }
-async function facet(db:D1Database,itineraryId:string,type:string,nowIso:string){const f=await db.prepare("SELECT status,expires_at FROM readiness_facets WHERE itinerary_id=? AND facet_type=?").bind(itineraryId,type).first<any>();return f&&f.status==="PASS"&&fresh(f.expires_at,nowIso);}
+
+export async function ingestAirportChangePolicy(db:D1Database,p:AirportChangePolicyInput,nowIso:string){
+  assert(!!p.policy_id&&/^[A-Z]{3}$/.test(p.from_airport)&&/^[A-Z]{3}$/.test(p.to_airport)&&p.from_airport!==p.to_airport&&!!p.authority,"AIRPORT_CHANGE_POLICY_IDENTITY_REQUIRED");
+  assert(Number.isInteger(p.ground_transfer_minutes)&&p.ground_transfer_minutes>=0&&Number.isInteger(p.ground_contingency_minutes)&&p.ground_contingency_minutes>=0,"AIRPORT_CHANGE_MARGIN_INVALID");
+  assert(fresh(p.expires_at,p.observed_at),"AIRPORT_CHANGE_POLICY_TIME_INVALID");assert(/^[a-f0-9]{64}$/i.test(p.raw_sha256),"AIRPORT_CHANGE_POLICY_HASH_INVALID");
+  const prior=await db.prepare("SELECT raw_sha256 FROM airport_change_policies WHERE policy_id=?").bind(p.policy_id).first<any>();if(prior){if(prior.raw_sha256!==p.raw_sha256)throw new Error("AIRPORT_CHANGE_POLICY_IMMUTABLE_CONFLICT");return {policy_id:p.policy_id,idempotent:true};}
+  await db.prepare("INSERT INTO airport_change_policies(policy_id,from_airport,to_airport,ground_transfer_minutes,ground_contingency_minutes,authority,observed_at,expires_at,raw_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)").bind(p.policy_id,p.from_airport,p.to_airport,p.ground_transfer_minutes,p.ground_contingency_minutes,p.authority,p.observed_at,p.expires_at,p.raw_sha256,nowIso).run();return {policy_id:p.policy_id,idempotent:false};
+}
+
+async function facet(db:D1Database,itineraryId:string,type:string,nowIso:string){const f=await db.prepare("SELECT status,expires_at FROM readiness_facets WHERE itinerary_id=? AND facet_type=?").bind(itineraryId,type).first<any>();return !!(f&&f.status==="PASS"&&fresh(f.expires_at,nowIso));}
+async function profile(db:D1Database,itineraryId:string){return db.prepare("SELECT i.profile_id,p.self_transfer_ok,p.overnight_transfer_ok,p.airport_change_ok FROM itinerary_candidates i LEFT JOIN runtime_profiles p ON p.profile_id=i.profile_id WHERE i.itinerary_id=?").bind(itineraryId).first<any>();}
 async function projectConnectionFacet(db:D1Database,itineraryId:string,nowIso:string){
   const rows=(await db.prepare("SELECT evaluation_status,evaluation_reason,evaluation_expires_at FROM transfer_boundaries WHERE itinerary_id=?").bind(itineraryId).all<any>()).results;let status:"PASS"|"FAIL"|"UNKNOWN"="PASS",reason="ALL_TRANSFER_BOUNDARIES_ACCEPTABLE";if(!rows.length){status="PASS";reason="NO_TRANSFER_BOUNDARY";}else if(rows.some(r=>r.evaluation_status==="FAIL")){status="FAIL";reason=rows.find(r=>r.evaluation_status==="FAIL")?.evaluation_reason??"TRANSFER_BOUNDARY_FAILED";}else if(rows.some(r=>!r.evaluation_status||r.evaluation_status==="UNKNOWN"||r.evaluation_status==="STALE")){status="UNKNOWN";reason=rows.find(r=>!r.evaluation_status||r.evaluation_status==="UNKNOWN"||r.evaluation_status==="STALE")?.evaluation_reason??"TRANSFER_BOUNDARY_UNEVALUATED";}
   const expiries=rows.map(r=>r.evaluation_expires_at).filter((x:any)=>fresh(x,nowIso)).map((x:any)=>Date.parse(x));const expiry=expiries.length?new Date(Math.min(...expiries)).toISOString():new Date(Date.parse(nowIso)+15*60000).toISOString();await db.prepare("INSERT INTO readiness_facets(itinerary_id,facet_type,status,reason_code,observed_at,expires_at,authority,evidence_id) VALUES(?,'CONNECTION_ACCEPTABLE',?,?,?,?, 'TRANSFER_RUNTIME',?) ON CONFLICT(itinerary_id,facet_type) DO UPDATE SET status=excluded.status,reason_code=excluded.reason_code,observed_at=excluded.observed_at,expires_at=excluded.expires_at,authority=excluded.authority,evidence_id=excluded.evidence_id").bind(itineraryId,status,reason,nowIso,expiry,`transfer:${itineraryId}`).run();return {status,reason,expires_at:expiry};
 }
+
 export async function evaluateTransferBoundary(db:D1Database,boundaryId:string,nowIso:string){
-  const b=await db.prepare("SELECT * FROM transfer_boundaries WHERE boundary_id=?").bind(boundaryId).first<any>();assert(!!b,"TRANSFER_BOUNDARY_NOT_FOUND");let status:"PASS"|"FAIL"|"UNKNOWN"="UNKNOWN",reason="TRANSFER_UNEVALUATED",required=Number(b.required_buffer_minutes??0),confidence=String(b.buffer_confidence??"LOW"),expiry=new Date(Date.parse(nowIso)+15*60000).toISOString();
+  const b=await db.prepare("SELECT * FROM transfer_boundaries WHERE boundary_id=?").bind(boundaryId).first<any>();assert(!!b,"TRANSFER_BOUNDARY_NOT_FOUND");let status:"PASS"|"FAIL"|"UNKNOWN"="UNKNOWN",reason="TRANSFER_UNEVALUATED",required=Number(b.required_buffer_minutes??0),confidence=String(b.buffer_confidence??"LOW"),expiry=new Date(Date.parse(nowIso)+15*60000).toISOString(),airportChangePolicyId:string|null=null;
   if(!b.self_transfer){if(b.protection_type==="UNKNOWN"||!b.evidence_id){status="UNKNOWN";reason="PROTECTION_EVIDENCE_REQUIRED";}else if(b.mct_status==="FAIL"){status="FAIL";reason="MCT_FAILED";}else if(b.mct_status==="PASS"){status="PASS";reason="PROTECTED_CONNECTION_MCT_PASS";}else{status="UNKNOWN";reason="MCT_UNKNOWN";}}
   else {
-    const p=await db.prepare("SELECT * FROM connection_buffer_policies WHERE airport=? ORDER BY observed_at DESC LIMIT 1").bind(b.airport).first<any>();
-    if(!p||!fresh(p.expires_at,nowIso)){status="UNKNOWN";reason="BUFFER_MODEL_UNCALIBRATED";confidence="LOW";}
-    else {expiry=p.expires_at;confidence=p.buffer_confidence;required=Number(p.airport_base_buffer)+Number(p.checkin_cutoff_margin)+Number(p.security_margin)+Number(p.delay_margin)+(b.requires_entry?Number(p.immigration_margin):0)+(b.requires_bag_reclaim?Number(p.baggage_reclaim_margin):0)+(b.terminal_change?Number(p.terminal_transfer_margin):0);
-      if(b.airport_change){status="FAIL";reason="AIRPORT_CHANGE_REQUIRES_EXPLICIT_MODEL";}
-      else if(b.requires_entry&&!(await facet(db,b.itinerary_id,"DOCUMENT_CLEAR",nowIso))){status="UNKNOWN";reason="DOCUMENT_CLEAR_REQUIRED";}
-      else if(b.requires_bag_reclaim&&!(await facet(db,b.itinerary_id,"BAGGAGE_FEASIBLE",nowIso))){status="UNKNOWN";reason="BAGGAGE_FEASIBILITY_REQUIRED";}
-      else if(b.protection_type==="UNKNOWN"||!b.evidence_id){status="UNKNOWN";reason="PROTECTION_EVIDENCE_REQUIRED";}
-      else if(Number(b.scheduled_buffer_minutes)<required){status="FAIL";reason="CONNECTION_BUFFER_INSUFFICIENT";}
-      else {status="PASS";reason="SELF_TRANSFER_BUFFER_ACCEPTABLE";}
+    const pr=await profile(db,b.itinerary_id);
+    if(!pr?.profile_id){status="UNKNOWN";reason="TRANSFER_PROFILE_REQUIRED";}
+    else if(!pr.self_transfer_ok){status="FAIL";reason="SELF_TRANSFER_PROFILE_DISALLOWED";}
+    else if(b.overnight_transfer&&!pr.overnight_transfer_ok){status="FAIL";reason="OVERNIGHT_TRANSFER_PROFILE_DISALLOWED";}
+    else if(b.airport_change&&!pr.airport_change_ok){status="FAIL";reason="AIRPORT_CHANGE_PROFILE_DISALLOWED";}
+    else {
+      const policyAirport=String(b.departure_airport||b.airport||"");
+      const p=await db.prepare("SELECT * FROM connection_buffer_policies WHERE airport=? ORDER BY observed_at DESC LIMIT 1").bind(policyAirport).first<any>();
+      if(!p||!fresh(p.expires_at,nowIso)){status="UNKNOWN";reason="BUFFER_MODEL_UNCALIBRATED";confidence="LOW";}
+      else {
+        expiry=p.expires_at;confidence=p.buffer_confidence;let airportChangeMinutes=0;
+        if(b.airport_change){
+          if(!/^[A-Z]{3}$/.test(String(b.arrival_airport??""))||!/^[A-Z]{3}$/.test(String(b.departure_airport??""))||b.arrival_airport===b.departure_airport){status="UNKNOWN";reason="AIRPORT_CHANGE_ENDPOINTS_REQUIRED";}
+          else {const ap=await db.prepare("SELECT * FROM airport_change_policies WHERE from_airport=? AND to_airport=? ORDER BY observed_at DESC LIMIT 1").bind(b.arrival_airport,b.departure_airport).first<any>();if(!ap||!fresh(ap.expires_at,nowIso)){status="UNKNOWN";reason="AIRPORT_CHANGE_MODEL_REQUIRED";}else{airportChangeMinutes=Number(ap.ground_transfer_minutes)+Number(ap.ground_contingency_minutes);airportChangePolicyId=ap.policy_id;expiry=minExpiry(expiry,ap.expires_at)??expiry;}}
+        }
+        required=Number(p.airport_base_buffer)+Number(p.checkin_cutoff_margin)+Number(p.security_margin)+Number(p.delay_margin)+(b.requires_entry?Number(p.immigration_margin):0)+(b.requires_bag_reclaim?Number(p.baggage_reclaim_margin):0)+(b.terminal_change&&!b.airport_change?Number(p.terminal_transfer_margin):0)+airportChangeMinutes;
+        if(status!=="UNKNOWN"||reason==="TRANSFER_UNEVALUATED"){
+          if(b.requires_entry&&!(await facet(db,b.itinerary_id,"DOCUMENT_CLEAR",nowIso))){status="UNKNOWN";reason="DOCUMENT_CLEAR_REQUIRED";}
+          else if(b.requires_bag_reclaim&&!(await facet(db,b.itinerary_id,"BAGGAGE_FEASIBLE",nowIso))){status="UNKNOWN";reason="BAGGAGE_FEASIBILITY_REQUIRED";}
+          else if(b.protection_type==="UNKNOWN"||!b.evidence_id){status="UNKNOWN";reason="PROTECTION_EVIDENCE_REQUIRED";}
+          else if(Number(b.scheduled_buffer_minutes)<required){status="FAIL";reason="CONNECTION_BUFFER_INSUFFICIENT";}
+          else {status="PASS";reason=b.airport_change?"AIRPORT_CHANGE_BUFFER_ACCEPTABLE":"SELF_TRANSFER_BUFFER_ACCEPTABLE";}
+        }
+      }
     }
   }
-  await db.prepare("UPDATE transfer_boundaries SET required_buffer_minutes=?,buffer_confidence=?,evaluation_status=?,evaluation_reason=?,evaluated_at=?,evaluation_expires_at=? WHERE boundary_id=?").bind(required,confidence,status,reason,nowIso,expiry,boundaryId).run();const itinerary=await projectConnectionFacet(db,b.itinerary_id,nowIso);return {boundary_id:boundaryId,status,reason,required_buffer_minutes:required,buffer_confidence:confidence,itinerary_status:itinerary.status};
+  await db.prepare("UPDATE transfer_boundaries SET required_buffer_minutes=?,buffer_confidence=?,evaluation_status=?,evaluation_reason=?,evaluated_at=?,evaluation_expires_at=?,airport_change_policy_id=? WHERE boundary_id=?").bind(required,confidence,status,reason,nowIso,expiry,airportChangePolicyId,boundaryId).run();const itinerary=await projectConnectionFacet(db,b.itinerary_id,nowIso);return {boundary_id:boundaryId,status,reason,required_buffer_minutes:required,buffer_confidence:confidence,airport_change_policy_id:airportChangePolicyId,itinerary_status:itinerary.status};
 }
