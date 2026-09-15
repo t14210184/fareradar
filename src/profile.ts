@@ -35,3 +35,28 @@ export async function profileBaggageQuery(db:D1Database,profileId:string,sliceCo
   const p=await db.prepare("SELECT checked_bag_pattern,baggage_kg,seat_required FROM runtime_profiles WHERE profile_id=?").bind(profileId).first<any>();
   if(!p)throw new Error("RUNTIME_PROFILE_NOT_FOUND"); return baggageQueryFromProfile(p,sliceCount);
 }
+
+export type RuntimeEntitlementType="MEMBER"|"SUBSCRIPTION"|"CHANNEL";
+export interface RuntimeEntitlementInput { entitlement_id:string; profile_id:string; entitlement_type:RuntimeEntitlementType; entitlement_key:string; state:"ACTIVE"|"INACTIVE"; valid_from?:string|null; valid_to?:string|null; evidence_sha256:string; }
+export async function upsertRuntimeEntitlement(db:D1Database,input:RuntimeEntitlementInput,nowIso:string){
+  assert(!!input.entitlement_id&&!!input.profile_id&&!!input.entitlement_key.trim(),"ENTITLEMENT_IDENTITY_REQUIRED");
+  assert(["MEMBER","SUBSCRIPTION","CHANNEL"].includes(input.entitlement_type),"ENTITLEMENT_TYPE_INVALID");
+  assert(["ACTIVE","INACTIVE"].includes(input.state),"ENTITLEMENT_STATE_INVALID");
+  assert(/^[a-f0-9]{64}$/i.test(input.evidence_sha256),"ENTITLEMENT_EVIDENCE_INVALID");
+  if(input.valid_from!=null)assert(Number.isFinite(Date.parse(input.valid_from)),"ENTITLEMENT_VALID_FROM_INVALID");
+  if(input.valid_to!=null)assert(Number.isFinite(Date.parse(input.valid_to)),"ENTITLEMENT_VALID_TO_INVALID");
+  if(input.valid_from&&input.valid_to)assert(Date.parse(input.valid_to)>=Date.parse(input.valid_from),"ENTITLEMENT_WINDOW_INVALID");
+  const profile=await db.prepare("SELECT profile_id FROM runtime_profiles WHERE profile_id=?").bind(input.profile_id).first();assert(!!profile,"RUNTIME_PROFILE_NOT_FOUND");
+  await db.prepare(`INSERT INTO runtime_entitlements(entitlement_id,profile_id,entitlement_type,entitlement_key,state,valid_from,valid_to,evidence_sha256,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(profile_id,entitlement_type,entitlement_key) DO UPDATE SET entitlement_id=excluded.entitlement_id,state=excluded.state,valid_from=excluded.valid_from,valid_to=excluded.valid_to,evidence_sha256=excluded.evidence_sha256,updated_at=excluded.updated_at`)
+    .bind(input.entitlement_id,input.profile_id,input.entitlement_type,input.entitlement_key.trim(),input.state,input.valid_from??null,input.valid_to??null,input.evidence_sha256,nowIso,nowIso).run();
+  return {entitlement_id:input.entitlement_id,profile_id:input.profile_id};
+}
+export async function promotionEntitlementAccess(db:D1Database,profileId:string,requirements:{member_requirement?:string|null;channel_requirement?:string|null},nowIso:string){
+  const member=requirements.member_requirement?.trim()||null,channel=requirements.channel_requirement?.trim()||null;
+  if(!member&&!channel)return {allowed:true,missing:[] as string[]};
+  const rows=(await db.prepare(`SELECT entitlement_type,entitlement_key FROM runtime_entitlements WHERE profile_id=? AND state='ACTIVE' AND (valid_from IS NULL OR valid_from<=?) AND (valid_to IS NULL OR valid_to>=?)`).bind(profileId,nowIso,nowIso).all<{entitlement_type:string;entitlement_key:string}>()).results;
+  const has=(types:string[],key:string|null)=>!key||rows.some(r=>types.includes(r.entitlement_type)&&r.entitlement_key===key);
+  const missing:string[]=[];if(!has(["MEMBER","SUBSCRIPTION"],member))missing.push(`MEMBER:${member}`);if(!has(["CHANNEL"],channel))missing.push(`CHANNEL:${channel}`);
+  return {allowed:missing.length===0,missing};
+}

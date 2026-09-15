@@ -1,6 +1,6 @@
 import type { D1Database } from "./types.js";
 import { validateExactFlightQuery, enqueueProviderSearch, type ExactFlightQuery } from "./provider_jobs.js";
-import { profileBaggageQuery } from "./profile.js";
+import { profileBaggageQuery, promotionEntitlementAccess } from "./profile.js";
 
 function isoDate(v:string){return /^\d{4}-\d{2}-\d{2}$/.test(v)&&Number.isFinite(Date.parse(`${v}T00:00:00Z`));}
 function iata(v:string){return /^[A-Z]{3}$/.test(v);}
@@ -48,7 +48,12 @@ export async function planSearchesForQueue(db:D1Database,campaignId:string,queue
   const routes=(parse<unknown[]>(q.route_scope_json)??[]).map(routePair).filter((x):x is [string,string]=>!!x).filter(([o,d])=>origins.has(o)&&dests.has(d));
   if(!routes.length)return {created:0,reason:"ROUTE_OUTSIDE_CAMPAIGN"};
   let tw={start:null as string|null,end:null as string|null};
-  if(q.signal_type==="PROMOTION"){const p=await db.prepare("SELECT travel_window FROM promotion_events WHERE event_id=?").bind(q.signal_id).first<any>();tw=travelWindow(p?.travel_window);}
+  if(q.signal_type==="PROMOTION"){
+    const p=await db.prepare("SELECT travel_window,member_requirement,channel_requirement FROM promotion_events WHERE event_id=?").bind(q.signal_id).first<any>();
+    tw=travelWindow(p?.travel_window);
+    const access=await promotionEntitlementAccess(db,c.profile_id,{member_requirement:p?.member_requirement??null,channel_requirement:p?.channel_requirement??null},nowIso);
+    if(!access.allowed)return {created:0,reason:"PROMOTION_ENTITLEMENT_MISSING",missing:access.missing};
+  }
   const dates=parse<string[]>(c.departure_dates_json).filter(d=>(!tw.start||d>=tw.start)&&(!tw.end||d<=tw.end));
   const lengths=parse<number[]>(c.trip_lengths_json); const passengers=parse<any[]>(c.passengers_json); const max=Number(c.max_queries_per_signal)||6;
   const queries:ExactFlightQuery[]=[];

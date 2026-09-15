@@ -12,7 +12,7 @@ import { recordProviderRuntimeReadback, providerReady } from "./provider_runtime
 import { enqueueProviderSearch, leaseProviderJobs, completeProviderJob } from "./provider_jobs.js";
 import { upsertSearchCampaign, planSearchesForQueue, planDueCandidateSearches, dispatchProviderSearchPlans } from "./search_planner.js";
 import { ingestPolicyRecord, enrichItineraryPolicy } from "./policy_registry.js";
-import { upsertRuntimeProfile } from "./profile.js";
+import { upsertRuntimeProfile, upsertRuntimeEntitlement } from "./profile.js";
 import { upsertPaymentProfile, enqueueCheckoutReprice, ingestPricingQuote } from "./checkout_pricing.js";
 import { ingestFxSnapshot, ingestCostEvidenceSnapshot, upsertMandatoryCostEvidence, upsertCostCoverageAssertion, attachFxToCost, recomputeDirectAllInCost } from "./cost_runtime.js";
 import { upsertFourLegCycle, transitionFourLegCycle, fourLegLiabilitySummary } from "./four_leg.js";
@@ -42,6 +42,10 @@ const worker={
     if(req.method==="POST"&&u.pathname==="/profiles/upsert"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
       try{return json({ok:true,...await upsertRuntimeProfile(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/profiles/entitlements/upsert"){
+      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await upsertRuntimeEntitlement(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/policies/ingest"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);

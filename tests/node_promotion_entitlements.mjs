@@ -1,0 +1,20 @@
+import { DatabaseSync } from 'node:sqlite'; import fs from 'node:fs';
+import { upsertRuntimeProfile, upsertRuntimeEntitlement, promotionEntitlementAccess } from '../dist/profile.js';
+import { upsertSearchCampaign, planSearchesForQueue } from '../dist/search_planner.js';
+import { enqueueCandidateSignal } from '../dist/priority.js';
+class S{constructor(s){this.s=s;this.a=[]}bind(...a){this.a=a;return this}async run(){return{success:true,meta:this.s.run(...this.a)}}async first(){return this.s.get(...this.a)??null}async all(){return{results:this.s.all(...this.a)}}}class D{constructor(x){this.x=x}prepare(q){return new S(this.x.prepare(q))}async batch(a){this.x.exec('BEGIN IMMEDIATE');try{const o=[];for(const s of a)o.push(await s.run());this.x.exec('COMMIT');return o}catch(e){this.x.exec('ROLLBACK');throw e}}}
+const raw=new DatabaseSync(':memory:');for(const f of fs.readdirSync(new URL('../migrations/',import.meta.url)).filter(x=>x.endsWith('.sql')).sort())raw.exec(fs.readFileSync(new URL(`../migrations/${f}`,import.meta.url),'utf8'));const db=new D(raw);const now='2026-09-15T00:00:00Z';
+raw.prepare("insert into provider_access_registry(provider_id,access_basis,terms_snapshot_at,rate_policy,kill_switch_state,owner,connector_state,supported_verification_json,background_allowed) values('p','OFFICIAL_API','2026-09-15T00:00:00Z','TARGETED_ONLY','CLEAR','test','IMPLEMENTED','[\"LIVE_REPRICE\"]',0)").run();
+await upsertRuntimeProfile(db,{profile_id:'prof',home_airports:['TPE'],checked_bag_pattern:'NONE',baggage_kg:0,seat_required:false,red_eye_ok:true,self_transfer_ok:true,overnight_transfer_ok:true,airport_change_ok:true,mainland_permit_status:'UNKNOWN',korea_entry_profile:'UNKNOWN',foreign_origin_ok:true,positioning_cost_attribution:'FULL',max_positioning_cost_twd:10000,value_of_time_twd_per_hour:300,min_savings_for_self_transfer_twd:2000,currency:'TWD'},now);
+await upsertSearchCampaign(db,{campaign_id:'camp',profile_id:'prof',provider_id:'p',origin_airports:['TPE'],destination_airports:['KIX'],departure_dates:['2026-11-03'],trip_lengths_nights:[3],passengers:[{type:'adult'}],max_queries_per_signal:2,enabled:true,expires_at:'2026-12-31T00:00:00Z'},now);
+raw.prepare("insert into promotion_events(event_id,fingerprint,state,market,airline,routes_json,prices_json,observed_at,updated_at,travel_window,member_requirement,channel_requirement) values('promo','fp','DISCOVERED','TW','IT','[\"TPE-KIX\"]','[]',?,?,?, 'TEAM_TIGER','APP_ONLY')").run(now,now,'{"start":"2026-11-01","end":"2026-11-10"}');
+await enqueueCandidateSignal(db,{signal_type:'PROMOTION',signal_id:'promo',required_verification:'LIVE_REPRICE',priority_score:70,route_scope:['TPE-KIX'],source_evidence_id:'obs',observed_at:now},now);
+const missingBoth=await planSearchesForQueue(db,'camp','promotion:promo',now);
+await upsertRuntimeEntitlement(db,{entitlement_id:'e-member',profile_id:'prof',entitlement_type:'MEMBER',entitlement_key:'TEAM_TIGER',state:'ACTIVE',valid_to:'2026-12-31T00:00:00Z',evidence_sha256:'a'.repeat(64)},now);
+const missingChannel=await planSearchesForQueue(db,'camp','promotion:promo',now);
+await upsertRuntimeEntitlement(db,{entitlement_id:'e-channel',profile_id:'prof',entitlement_type:'CHANNEL',entitlement_key:'APP_ONLY',state:'ACTIVE',valid_to:'2026-12-31T00:00:00Z',evidence_sha256:'b'.repeat(64)},now);
+const allowed=await planSearchesForQueue(db,'camp','promotion:promo',now);
+const active=await promotionEntitlementAccess(db,'prof',{member_requirement:'TEAM_TIGER',channel_requirement:'APP_ONLY'},now);
+const expired=await promotionEntitlementAccess(db,'prof',{member_requirement:'TEAM_TIGER'},'2027-01-02T00:00:00Z');
+const publicAccess=await promotionEntitlementAccess(db,'prof',{},now);
+console.log(JSON.stringify({missingBoth,missingChannel,allowed,active,expired,publicAccess,plans:raw.prepare('select count(*) n from provider_search_plans').get().n}));
