@@ -16,16 +16,18 @@ export function validateExactFlightQuery(q:ExactFlightQuery){
   if(q.max_connections!==undefined&&(!Number.isInteger(q.max_connections)||q.max_connections<0||q.max_connections>3))throw new Error("QUERY_CONNECTIONS_INVALID");
   return true;
 }
-export async function enqueueProviderSearch(db:D1Database,input:{provider_id:string;mode:"BACKGROUND"|"USER_REQUEST";query:ExactFlightQuery},nowIso:string){
+export async function enqueueProviderSearch(db:D1Database,input:{provider_id:string;mode:"BACKGROUND"|"USER_REQUEST";query:ExactFlightQuery;refresh_key?:string},nowIso:string){
   validateExactFlightQuery(input.query);
   const p=await db.prepare("SELECT terms_snapshot_at,kill_switch_state,connector_state,supported_verification_json,background_allowed FROM provider_access_registry WHERE provider_id=?").bind(input.provider_id).first<any>();
   if(!p||p.kill_switch_state!=="CLEAR"||p.connector_state!=="IMPLEMENTED"||!currentTerms(p.terms_snapshot_at))throw new Error("PROVIDER_ACCESS_NOT_READY");
   let caps:string[]=[];try{caps=JSON.parse(p.supported_verification_json??"[]");}catch{} if(!caps.includes("LIVE_REPRICE"))throw new Error("PROVIDER_CAPABILITY_NOT_ALLOWED");
   if(input.mode==="BACKGROUND"&&!p.background_allowed)throw new Error("PROVIDER_BACKGROUND_NOT_ALLOWED");
-  const fp=await sha256Hex(stable(input.query)); const jobId=`provider:${input.provider_id}:${fp}`;
+  const fp=await sha256Hex(stable(input.query));
+  if(input.refresh_key!==undefined&&(!input.refresh_key.trim()||input.refresh_key.length>512))throw new Error("PROVIDER_REFRESH_KEY_INVALID");
+  const refreshSuffix=input.refresh_key?`:refresh:${(await sha256Hex(input.refresh_key)).slice(0,24)}`:""; const jobId=`provider:${input.provider_id}:${fp}${refreshSuffix}`;
   const existing=await db.prepare("SELECT job_id FROM verification_jobs WHERE job_id=?").bind(jobId).first();if(existing)return {job_id:jobId,query_fingerprint:fp,idempotent:true};
   await reserveProviderSearchBudget(db,input.provider_id,nowIso);
-  const payload={provider_id:input.provider_id,query_fingerprint:fp,mode:input.mode,query:input.query};
+  const payload={provider_id:input.provider_id,query_fingerprint:fp,mode:input.mode,query:input.query,refresh_key:input.refresh_key??null};
   await db.prepare("INSERT OR IGNORE INTO verification_jobs(job_id,job_type,target_class,source_id,payload_json,state,available_at,created_at,provider_id,query_fingerprint,provider_mode) VALUES(?,'LIVE_REPRICE','PROVIDER_API',NULL,?,'PENDING',?,?,?,?,?)")
     .bind(jobId,JSON.stringify(payload),nowIso,nowIso,input.provider_id,fp,input.mode).run();
   return {job_id:jobId,query_fingerprint:fp,idempotent:false};

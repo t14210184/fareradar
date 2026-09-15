@@ -27,6 +27,8 @@ required={
 'provider_search_plans':{'plan_id','campaign_id','queue_id','provider_id','query_fingerprint','query_json','state','provider_job_id','next_attempt_at'},
 'candidate_offer_links':{'queue_id','plan_id','job_id','provider_offer_id','query_fingerprint'},
 'candidate_verification_results':{'result_id','queue_id','query_fingerprint','verification_state','reason','best_offer_id','live_offer_count','provider_count'},
+'candidate_verification_supports':{'result_id','provider_offer_id','support_role','created_at'},
+'live_offer_lifecycle_events':{'event_id','result_id','queue_id','query_fingerprint','itinerary_id','provider_offer_id','previous_verification_state','new_verification_state','reason','effective_at','support_provider_ids_json','had_visible_notification','correction_state','reprice_state','last_error','created_at','updated_at'},
 'policy_records':{'policy_record_id','policy_code','jurisdiction','traveler_document_class','observed_at','effective_from','effective_to','jurisdiction_timezone','travel_event','source_url','source_authority','source_snapshot_hash','refresh_margin_hours','ttl_hours','watch_window_hours','decision_status','status'},
 'runtime_profiles':{'profile_id','home_airports_json','checked_bag_pattern','baggage_kg','seat_required','red_eye_ok','self_transfer_ok','overnight_transfer_ok','airport_change_ok','mainland_permit_status','korea_entry_profile','foreign_origin_ok','positioning_cost_attribution','max_positioning_cost_twd','value_of_time_twd_per_hour','min_savings_for_self_transfer_twd','currency'},
 'runtime_payment_profiles':{'payment_profile_id','provider_id','payment_method_class','credential_binding','enabled','expires_at'},

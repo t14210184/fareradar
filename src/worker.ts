@@ -7,6 +7,7 @@ import { ingestAgencyOffer, ingestEmailEvidence } from "./partner_ingest.js";
 import { leaseAgencyRechecks, completeAgencyRecheck } from "./agency_recheck.js";
 import { leaseAgencyCheckouts, completeAgencyCheckout } from "./agency_checkout.js";
 import { expireAgencyOffers } from "./agency_expiry.js";
+import { expireLiveProviderOffers } from "./offer_lifecycle.js";
 import { ingestOfferSnapshot } from "./offers.js";
 import { recordAuditEvidence, recordSourceDiscoveryEdge } from "./audit.js";
 import { leaseCandidateSignals, ackCandidateSignal } from "./priority.js";
@@ -250,6 +251,6 @@ const worker={
     }
     return json({error:"NOT_FOUND"},404);
   }
-  ,async scheduled(event:any,env:Env):Promise<void>{ const now=new Date().toISOString(); await cleanupExpiredNonces(env.DB,now); if(event?.cron==="*/5 * * * *"){await expireAgencyOffers(env.DB,now,1);await planDueCandidateSearches(env.DB,now,8,4);await dispatchProviderSearchPlans(env.DB,now,2);await evaluateDueProvisionals(env.DB,now,1);await evaluateDuePromotionBursts(env.DB,now,1);return;} await projectAlertIntents(env.DB,now,10); await projectDomainEvents(env.DB,now,"cron",2); await scheduleDueSources(env.DB,now,10); }
+  ,async scheduled(event:any,env:Env):Promise<void>{ const now=new Date().toISOString(); await cleanupExpiredNonces(env.DB,now); if(event?.cron==="*/5 * * * *"){const agencyExpiry=await expireAgencyOffers(env.DB,now,1);if(agencyExpiry.expired)return;const liveExpiry=await expireLiveProviderOffers(env.DB,now,1);if(liveExpiry.processed||liveExpiry.resumed)return;await planDueCandidateSearches(env.DB,now,8,4);await dispatchProviderSearchPlans(env.DB,now,2);await evaluateDueProvisionals(env.DB,now,1);await evaluateDuePromotionBursts(env.DB,now,1);return;} await projectAlertIntents(env.DB,now,10); await projectDomainEvents(env.DB,now,"cron",2); await scheduleDueSources(env.DB,now,10); }
 };
 export default worker;

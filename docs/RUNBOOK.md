@@ -47,3 +47,24 @@ npm run deploy:plan
 `deploy:plan` never mutates GitHub or Cloudflare. It prints the exact external blockers and ordered shared-mutation steps. GitHub remote creation, Cloudflare authentication, D1 creation/binding, secret provisioning, Worker deployment and provider readback require an authorized provider connector or equivalent mutation channel plus same-source readback; there is intentionally no deployment mutation command in `package.json`.
 
 After deployment exists, Shadow acceptance remains separate. Production readiness is only allowed after the 14-day labeled Shadow corpus passes the v1.3 acceptance evaluator and `npm run preflight` returns no blockers.
+
+## Live provider offer expiry lifecycle
+
+The five-minute cron actively checks the exact LIVE offers supporting current `CONFIRMED` verification results. Expected behavior when a support expires:
+
+1. Re-evaluate already-linked fresh evidence first.
+2. Preserve `CONFIRMED` with rotated support when redundant evidence is sufficient.
+3. Otherwise downgrade to `PROBABLE`, mark `FARE_VERIFIED=STALE`, cancel/suppress unsent DEAL notifications, and enqueue a deterministic `DEAL-UPDATE` for a previously visible DEAL.
+4. Re-use the existing provider search plan to enqueue a bounded `BACKGROUND` reprice keyed by the lifecycle event.
+5. Provider completion recomputes verification and projects fresh cost/readiness lineage.
+
+Local regression coverage:
+
+```bash
+pytest -q tests/verification/test_multi_provider.py
+pytest -q tests/capacity/test_five_min_cron_budget.py
+node tests/node_live_offer_expiry.mjs
+node tests/node_live_offer_expiry_redundant.mjs
+```
+
+The capacity fixtures require the normal five-minute path to stay at or below the internal 40-query target; lifecycle work preempts optional work for that tick.
