@@ -7,6 +7,7 @@ import { ingestAgencyOffer, ingestEmailEvidence } from "./partner_ingest.js";
 import { ingestOfferSnapshot } from "./offers.js";
 import { recordAuditEvidence, recordSourceDiscoveryEdge } from "./audit.js";
 import { leaseCandidateSignals, ackCandidateSignal } from "./priority.js";
+import { applySourceOnboardingReview, disableSource } from "./source_onboarding.js";
 
 export interface Env { DB:D1Database; INGEST_HMAC_SECRET:string; }
 const enc=new TextEncoder();
@@ -75,6 +76,14 @@ const worker={
     }
     if(req.method==="POST"&&u.pathname==="/candidate-priority/ack"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401); return json({state:await ackCandidateSignal(env.DB,JSON.parse(body),new Date().toISOString())});
+    }
+    if(req.method==="POST"&&u.pathname==="/sources/onboarding/review"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await applySourceOnboardingReview(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m.includes("IDEMPOTENCY_CONFLICT")?409:400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/sources/disable"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await disableSource(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     return json({error:"NOT_FOUND"},404);
   }
