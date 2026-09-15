@@ -9,7 +9,8 @@
     "owner": "provider",
     "connector_state": "IMPLEMENTED",
     "supported_verification": [
-      "LIVE_REPRICE"
+      "LIVE_REPRICE",
+      "CHECKOUT_REPRICE"
     ],
     "credential_binding": "DUFFEL_ACCESS_TOKEN",
     "background_allowed": false

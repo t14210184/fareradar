@@ -2,6 +2,7 @@ from __future__ import annotations
 import hashlib,json,urllib.request
 SEARCH_API='https://api.duffel.com/air/offer_requests?return_offers=true&view=offers'
 OFFER_API='https://api.duffel.com/air/offers/{offer_id}?return_available_services=true'
+PRICE_API='https://api.duffel.com/air/offers/{offer_id}/actions/price'
 ALLOWED_CABINS={'economy','premium_economy','business','first'}
 
 def build_request(query:dict)->dict:
@@ -40,13 +41,39 @@ def refresh_offer(offer_id:str,token:str,transport=default_get_transport)->dict:
     if data.get('id')!=offer_id: raise ValueError('DUFFEL_OFFER_REFRESH_INVALID')
     return data
 
+def price_offer(offer_id:str,token:str,selected_services:list[dict],card_id:str,transport=default_transport)->dict:
+    if not offer_id or not token or not card_id: raise ValueError('DUFFEL_PRICE_INPUT_INVALID')
+    services=[]
+    for item in selected_services or []:
+        sid=item.get('id'); qty=item.get('quantity')
+        if not sid or not isinstance(qty,int) or qty < 1: raise ValueError('DUFFEL_PRICE_SERVICE_INVALID')
+        services.append({'id':sid,'quantity':qty})
+    payload={'data':{'intended_payment_methods':[{'type':'card','card_id':card_id}],'intended_services':services}}
+    response=transport(PRICE_API.format(offer_id=offer_id),headers(token),json.dumps(payload,separators=(',',':')).encode()); data=response.get('data') or {}
+    if data.get('id')!=offer_id: raise ValueError('DUFFEL_PRICE_RESPONSE_INVALID')
+    return data
+
+def normalize_price_quote(data:dict,provider_offer_id:str,payment_profile_id:str,selected_services:list[dict],source_job_id:str,priced_at:str)->dict:
+    cur=data.get('total_currency'); amount=data.get('total_amount')
+    if data.get('id')!=provider_offer_id or not cur or amount is None: raise ValueError('DUFFEL_PRICE_RESPONSE_INVALID')
+    surcharge=0.0
+    for method in data.get('intended_payment_methods') or []:
+        if method.get('type')!='card': continue
+        sc=method.get('surcharge_currency'); sa=method.get('surcharge_amount')
+        if sa is None: continue
+        if sc and sc!=cur: raise ValueError('DUFFEL_SURCHARGE_CURRENCY_MISMATCH')
+        surcharge += float(sa)
+    base=float(amount); raw=json.dumps(data,sort_keys=True,separators=(',',':'),ensure_ascii=False); raw_hash=hashlib.sha256(raw.encode()).hexdigest()
+    services=sorted([{'id':x['id'],'quantity':int(x['quantity'])} for x in selected_services],key=lambda x:x['id'])
+    return {'quote_id':f'price:{provider_offer_id}:{raw_hash[:24]}','provider_offer_id':provider_offer_id,'provider_id':'duffel','source_job_id':source_job_id,'payment_profile_id':payment_profile_id,'selected_services':services,'payment_method_class':'CARD','currency':cur,'fare_and_services_total':base,'surcharge_total':surcharge,'grand_total':base+surcharge,'priced_at':priced_at,'expires_at':data.get('expires_at'),'raw_sha256':raw_hash,'price_scope':'CHECKOUT_TOTAL_WITH_SELECTED_SERVICES_AND_PAYMENT_SURCHARGE'}
+
 def _bag_list(passengers):
     out=[]
     for p in passengers or []:
         bags=[]
         for b in p.get('baggages') or []:
             if not isinstance(b,dict): continue
-            bags.append({k:b.get(k) for k in ('type','quantity') if b.get(k) is not None})
+            bags.append({k:b.get(k) for k in ('type','quantity','weight_kg','maximum_weight_kg','max_weight_kg') if b.get(k) is not None})
         out.append({'passenger_id':p.get('passenger_id'),'baggages':bags})
     return out
 

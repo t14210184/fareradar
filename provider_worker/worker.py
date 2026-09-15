@@ -8,20 +8,31 @@ def post_json(base_url:str,path:str,payload:dict,secret:str):
     body=json.dumps(payload,separators=(',',':'),ensure_ascii=False); req=urllib.request.Request(base_url.rstrip('/')+path,data=body.encode(),headers=sign_headers(secret,body),method='POST')
     with urllib.request.urlopen(req,timeout=25) as r:return json.loads(r.read().decode())
 
-def run_once(base_url:str,secret:str,token:str|None,worker_id:str,cloud_post=post_json,duffel_transport=duffel.default_transport,duffel_detail_transport=duffel.default_get_transport):
-    has_token=bool(token)
-    cloud_post(base_url,'/providers/runtime/readback',{'provider_id':'duffel','worker_id':worker_id,'connector_version':'duffel-v2-1','credentials_present':has_token,'capabilities':['LIVE_REPRICE'],'ttl_seconds':300},secret)
+def run_once(base_url:str,secret:str,token:str|None,worker_id:str,cloud_post=post_json,duffel_transport=duffel.default_transport,duffel_detail_transport=duffel.default_get_transport,duffel_price_transport=duffel.default_transport,credential_resolver=os.environ.get):
+    has_token=bool(token); card_id=credential_resolver('DUFFEL_PAYMENT_CARD_ID') if has_token else None
+    caps=['LIVE_REPRICE'] if has_token else []
+    if has_token and card_id:caps.append('CHECKOUT_REPRICE')
+    cloud_post(base_url,'/providers/runtime/readback',{'provider_id':'duffel','worker_id':worker_id,'connector_version':'duffel-v2-2','credentials_present':has_token,'capabilities':caps,'ttl_seconds':300},secret)
     if not token:return [{'status':'NO_CREDENTIALS'}]
-    leased=cloud_post(base_url,'/provider-jobs/lease',{'provider_id':'duffel','worker_id':worker_id,'limit':3},secret).get('jobs',[]); results=[]
+    leased=cloud_post(base_url,'/provider-jobs/lease',{'provider_id':'duffel','worker_id':worker_id,'verification_types':caps,'limit':3},secret).get('jobs',[]); results=[]
     for job in leased:
         try:
-            payload=json.loads(job['payload_json']); query=payload['query']; qfp=job.get('query_fingerprint') or payload['query_fingerprint']
-            found=duffel.search(query,token,duffel_transport); now=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
-            normalized=[]
+            payload=json.loads(job['payload_json']); now=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
+            if job.get('job_type')=='CHECKOUT_REPRICE':
+                binding=payload.get('credential_binding'); payment_card=credential_resolver(binding) if binding else None
+                if not payment_card: raise ValueError('PAYMENT_CREDENTIAL_MISSING')
+                priced=duffel.price_offer(payload['provider_offer_id'],token,payload.get('selected_services') or [],payment_card,duffel_price_transport)
+                quote=duffel.normalize_price_quote(priced,payload['provider_offer_id'],payload['payment_profile_id'],payload.get('selected_services') or [],job['job_id'],now)
+                cloud_post(base_url,'/pricing-quotes/ingest',quote,secret)
+                cloud_post(base_url,'/provider-jobs/complete',{'job_id':job['job_id'],'provider_id':'duffel','success':True},secret)
+                results.append({'job_id':job['job_id'],'status':'DONE','quote_id':quote['quote_id']}); continue
+            if job.get('job_type') not in (None,'LIVE_REPRICE'): raise ValueError('PROVIDER_JOB_TYPE_UNSUPPORTED')
+            query=payload['query']; qfp=job.get('query_fingerprint') or payload['query_fingerprint']
+            found=duffel.search(query,token,duffel_transport); normalized=[]
             for offer in sorted(found['offers'],key=lambda o:float(o.get('total_amount','inf')))[:3]:
                 oid=offer.get('id')
                 if not oid: continue
-                try: detailed=duffel.refresh_offer(oid,token,duffel_detail_transport)
+                try:detailed=duffel.refresh_offer(oid,token,duffel_detail_transport)
                 except Exception: continue
                 snap=duffel.normalize_offer(detailed,query,qfp,job['job_id'],now,'REFRESHED_LIVE'); cloud_post(base_url,'/offers/ingest',snap,secret); normalized.append(snap['provider_offer_id'])
             cloud_post(base_url,'/provider-jobs/complete',{'job_id':job['job_id'],'provider_id':'duffel','success':True},secret)
