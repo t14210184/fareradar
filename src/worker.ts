@@ -10,6 +10,7 @@ import { leaseCandidateSignals, ackCandidateSignal } from "./priority.js";
 import { applySourceOnboardingReview, disableSource } from "./source_onboarding.js";
 import { recordProviderRuntimeReadback, providerReady } from "./provider_runtime.js";
 import { enqueueProviderSearch, leaseProviderJobs, completeProviderJob } from "./provider_jobs.js";
+import { upsertSearchCampaign, planSearchesForQueue, planDueCandidateSearches, dispatchProviderSearchPlans } from "./search_planner.js";
 
 export interface Env { DB:D1Database; INGEST_HMAC_SECRET:string; }
 const enc=new TextEncoder();
@@ -103,8 +104,20 @@ const worker={
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
       try{return json({state:await completeProviderJob(env.DB,JSON.parse(body),new Date().toISOString())});}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
+    if(req.method==="POST"&&u.pathname==="/search-campaigns/upsert"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{return json({ok:true,...await upsertSearchCampaign(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/search-planner/plan"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{const p=JSON.parse(body);return json({ok:true,...await planSearchesForQueue(env.DB,p.campaign_id,p.queue_id,new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/search-planner/dispatch"){
+      const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
+      try{const p=JSON.parse(body);return json({ok:true,...await dispatchProviderSearchPlans(env.DB,new Date().toISOString(),Math.min(p.limit??2,2))},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
     return json({error:"NOT_FOUND"},404);
   }
-  ,async scheduled(_event:unknown,env:Env):Promise<void>{ const now=new Date().toISOString(); await projectAlertIntents(env.DB,now,10); await projectDomainEvents(env.DB,now,"cron",2); await scheduleDueSources(env.DB,now,10); }
+  ,async scheduled(event:any,env:Env):Promise<void>{ const now=new Date().toISOString(); if(event?.cron==="*/5 * * * *"){await planDueCandidateSearches(env.DB,now,8,4);await dispatchProviderSearchPlans(env.DB,now,2);return;} await projectAlertIntents(env.DB,now,10); await projectDomainEvents(env.DB,now,"cron",2); await scheduleDueSources(env.DB,now,10); }
 };
 export default worker;

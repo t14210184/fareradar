@@ -22,7 +22,9 @@ required={
 'email_evidence':{'message_id','source_id','from_domain','body_sha256','dkim_result','spf_result','dmarc_result','canonical_links_json','expanded_links_json','link_risk_class','trust_class','retention_until'},
 'source_health_windows':{'source_id','window_start','window_end','fetch_count','success_count','unique_event_count','confirmed_count','ghost_count','duplicate_count','first_win_count','median_lead_seconds','fetch_error_rate','mean_request_cost','mean_cpu_ms','schema_drift_count','recommended_schedule_action'},
 'verification_jobs':{'job_id','target_class','source_id','state','attempts','available_at','lease_until'},
-'source_outcome_attributions':{'attribution_id','itinerary_id','source_id','observation_id','outcome_type','first_win','window_date','observed_at','confirmed_at'} }
+'source_outcome_attributions':{'attribution_id','itinerary_id','source_id','observation_id','outcome_type','first_win','window_date','observed_at','confirmed_at'},
+'search_campaigns':{'campaign_id','profile_id','provider_id','departure_dates_json','trip_lengths_json','passengers_json','max_queries_per_signal','enabled','expires_at'},
+'provider_search_plans':{'plan_id','campaign_id','queue_id','provider_id','query_fingerprint','query_json','state','provider_job_id','next_attempt_at'} }
 for table, cols in required.items():
     got={r[1] for r in db.execute(f'pragma table_info({table})')}
     missing=cols-got
