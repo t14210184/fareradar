@@ -35,9 +35,13 @@ def parse_gate_table()->list[dict]:
 def run_gate(row:dict,ctx:dict)->dict:
     start=dt.datetime.now(dt.timezone.utc).isoformat()
     env=os.environ.copy(); env['FARE_SKIP_BUILD']='1'
-    p=subprocess.run(row['exact_command'],shell=True,cwd=ROOT,text=True,capture_output=True,env=env)
-    end=dt.datetime.now(dt.timezone.utc).isoformat(); output=p.stdout+p.stderr
-    return {**row,**ctx,'start':start,'end':end,'returncode':p.returncode,'status':'LOCAL_TEST_PASS' if p.returncode==0 else 'LOCAL_TEST_FAIL','report_sha256':sha256_bytes(output.encode()),'output_tail':output[-1600:]}
+    try:
+        p=subprocess.run(row['exact_command'],shell=True,cwd=ROOT,text=True,capture_output=True,env=env,timeout=90)
+        end=dt.datetime.now(dt.timezone.utc).isoformat(); output=p.stdout+p.stderr; rc=p.returncode
+        status='LOCAL_TEST_PASS' if rc==0 else 'LOCAL_TEST_FAIL'
+    except subprocess.TimeoutExpired as e:
+        end=dt.datetime.now(dt.timezone.utc).isoformat(); output=((e.stdout or '')+(e.stderr or '')) if isinstance(e.stdout,str) else ''; rc=124; status='LOCAL_TEST_FAIL'
+    return {**row,**ctx,'start':start,'end':end,'returncode':rc,'status':status,'report_sha256':sha256_bytes(output.encode()),'output_tail':output[-1600:]}
 
 def stage_path(n:int)->pathlib.Path:return OUT/f'gate-stage-{n}.json'
 def write_stage(n:int)->dict:
@@ -45,7 +49,10 @@ def write_stage(n:int)->dict:
     rows=parse_gate_table(); start=n*STAGE_SIZE; subset=rows[start:start+STAGE_SIZE]
     if not subset:raise SystemExit('GATE_STAGE_OUT_OF_RANGE')
     subprocess.run(['tsc','-p','tsconfig.json','--noEmit'],cwd=ROOT,check=True)
-    ctx=context(); results=[run_gate(r,ctx) for r in subset]
+    ctx=context()
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(4,len(subset))) as ex:
+        results=list(ex.map(lambda r: run_gate(r,ctx),subset))
     doc={'schema_version':2,'stage':n,'context':ctx,'gates':results,'summary':{'LOCAL_TEST_PASS':sum(r['status']=='LOCAL_TEST_PASS' for r in results),'LOCAL_TEST_FAIL':sum(r['status']=='LOCAL_TEST_FAIL' for r in results)}}
     stage_path(n).write_text(json.dumps(doc,ensure_ascii=False,indent=2))
     print(json.dumps({'stage':n,**doc['summary']},ensure_ascii=False))
