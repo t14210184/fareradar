@@ -20,6 +20,7 @@ import { ingestCarrierTicketingPolicy, evaluateTicketingGuards } from "./ticketi
 import { ingestConnectionBufferPolicy, ingestAirportChangePolicy, evaluateTransferBoundary } from "./transfer_runtime.js";
 import { evaluateActionableFromDb } from "./readiness_runtime.js";
 import { evaluateDueProvisionals } from "./provisional.js";
+import { evaluateDuePromotionBursts } from "./social_heat.js";
 import { buildCanonicalCandidateAlert } from "./alert_runtime.js";
 import { authorizeRequest, principalAllowsPayload, cleanupExpiredNonces, workerTokenAuthorized, workerLeaseAllowsSource, providerLeaseAllowsJob, type AuthEnv } from "./auth.js";
 
@@ -221,6 +222,6 @@ const worker={
     }
     return json({error:"NOT_FOUND"},404);
   }
-  ,async scheduled(event:any,env:Env):Promise<void>{ const now=new Date().toISOString(); await cleanupExpiredNonces(env.DB,now); if(event?.cron==="*/5 * * * *"){await planDueCandidateSearches(env.DB,now,8,4);await dispatchProviderSearchPlans(env.DB,now,2);await evaluateDueProvisionals(env.DB,now,1);return;} await projectAlertIntents(env.DB,now,10); await projectDomainEvents(env.DB,now,"cron",2); await scheduleDueSources(env.DB,now,10); }
+  ,async scheduled(event:any,env:Env):Promise<void>{ const now=new Date().toISOString(); await cleanupExpiredNonces(env.DB,now); if(event?.cron==="*/5 * * * *"){await planDueCandidateSearches(env.DB,now,8,4);await dispatchProviderSearchPlans(env.DB,now,2);await evaluateDueProvisionals(env.DB,now,1);await evaluateDuePromotionBursts(env.DB,now,1);return;} await projectAlertIntents(env.DB,now,10); await projectDomainEvents(env.DB,now,"cron",2); await scheduleDueSources(env.DB,now,10); }
 };
 export default worker;
