@@ -19,8 +19,14 @@ def structured_signal(text:str,source_id:str):
         for n in re.findall(pat,text,re.I): prices.append({'currency':cur,'amount':int(n.replace(',',''))})
     m=re.search(r'(?:優惠碼|折扣碼|promo\s*code)\s*[:：]?\s*([A-Z0-9_-]{3,20})',text,re.I)
     keywords=[k for k in ['特價','促銷','清艙','清倉','限時','flash sale','sale'] if k.lower() in text.lower()]
+    member_requirement='TEAM_TIGER' if re.search(r'team\s*tiger|尊榮虎',text,re.I) else ('MEMBER_ONLY' if re.search(r'(?:會員(?:限定|專屬)|member[-\s]?only)',text,re.I) else None)
+    channel_requirements=[]
+    if '樂虎卡' in text: channel_requirements.append('LOHO_CARD')
+    if re.search(r'(?:app\s*(?:only|限定)|APP限定)',text,re.I): channel_requirements.append('APP_ONLY')
+    if re.search(r'(?:line\s*(?:only|限定)|LINE限定)',text,re.I): channel_requirements.append('LINE_ONLY')
+    channel_requirement='+'.join(sorted(set(channel_requirements))) if channel_requirements else None
     if not (routes or prices or keywords): return None
-    return {'extraction_type':'PROMOTION_SIGNAL','structured_payload':{'market':'TW','routes':sorted(set(routes)),'prices':prices,'promo_code':m.group(1).upper() if m else None,'keywords':keywords,'source_id':source_id}}
+    return {'extraction_type':'PROMOTION_SIGNAL','structured_payload':{'market':'TW','routes':sorted(set(routes)),'prices':prices,'promo_code':m.group(1).upper() if m else None,'keywords':keywords,'member_requirement':member_requirement,'channel_requirement':channel_requirement,'source_id':source_id}}
 def sign_headers(secret:str,body:str,path:str,method:str='POST',key_id:str|None=None,nonce:str|None=None,ts:str|None=None):
     ts=ts or str(int(time.time()*1000)); key_id=key_id or os.environ.get('FARE_HMAC_KEY_ID')
     if not key_id:

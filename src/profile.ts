@@ -57,6 +57,6 @@ export async function promotionEntitlementAccess(db:D1Database,profileId:string,
   if(!member&&!channel)return {allowed:true,missing:[] as string[]};
   const rows=(await db.prepare(`SELECT entitlement_type,entitlement_key FROM runtime_entitlements WHERE profile_id=? AND state='ACTIVE' AND (valid_from IS NULL OR valid_from<=?) AND (valid_to IS NULL OR valid_to>=?)`).bind(profileId,nowIso,nowIso).all<{entitlement_type:string;entitlement_key:string}>()).results;
   const has=(types:string[],key:string|null)=>!key||rows.some(r=>types.includes(r.entitlement_type)&&r.entitlement_key===key);
-  const missing:string[]=[];if(!has(["MEMBER","SUBSCRIPTION"],member))missing.push(`MEMBER:${member}`);if(!has(["CHANNEL"],channel))missing.push(`CHANNEL:${channel}`);
+  const missing:string[]=[];if(!has(["MEMBER","SUBSCRIPTION"],member))missing.push(`MEMBER:${member}`);for(const key of (channel?channel.split("+").map(x=>x.trim()).filter(Boolean):[])){if(!has(["CHANNEL"],key))missing.push(`CHANNEL:${key}`);}
   return {allowed:missing.length===0,missing};
 }

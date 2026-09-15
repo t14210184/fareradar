@@ -11,3 +11,14 @@ def test_https_and_dns_ssrf_gate(monkeypatch):
     with pytest.raises(ValueError,match='SSRF_BLOCKED'): ew.validate_url('https://example.com/a')
 def test_structured_signal_is_discovery_only():
     x=ew.structured_signal('TPE-KIX 限時特價 NT$3,999 優惠碼 SALE','s1'); assert x['extraction_type']=='PROMOTION_SIGNAL'; assert x['structured_payload']['routes']==['TPE-KIX']; assert x['structured_payload']['prices'][0]['amount']==3999
+
+
+def test_structured_signal_preserves_member_and_channel_restrictions():
+    x=ew.structured_signal('TPE-KIX 尊榮虎 樂虎卡 限時特價 NT$3,999','s1')['structured_payload']
+    assert x['member_requirement']=='TEAM_TIGER'
+    assert x['channel_requirement']=='LOHO_CARD'
+
+
+def test_structured_signal_preserves_multiple_channel_restrictions():
+    x=ew.structured_signal('TPE-KIX 尊榮虎 樂虎卡 APP限定 限時特價 NT$3,999','s1')['structured_payload']
+    assert x['channel_requirement']=='APP_ONLY+LOHO_CARD'
