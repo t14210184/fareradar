@@ -19,6 +19,7 @@ import { upsertFourLegCycle, transitionFourLegCycle, fourLegLiabilitySummary } f
 import { ingestCarrierTicketingPolicy, evaluateTicketingGuards } from "./ticketing_guard.js";
 import { ingestConnectionBufferPolicy, ingestAirportChangePolicy, evaluateTransferBoundary } from "./transfer_runtime.js";
 import { evaluateActionableFromDb } from "./readiness_runtime.js";
+import { buildCanonicalCandidateAlert } from "./alert_runtime.js";
 
 export interface Env { DB:D1Database; INGEST_HMAC_SECRET:string; }
 const enc=new TextEncoder();
@@ -75,13 +76,16 @@ const worker={
     if(req.method==="POST"&&u.pathname==="/candidate/evaluate"){
       const body=await req.text(); if(!await authorized(req,body,env.INGEST_HMAC_SECRET))return json({error:"UNAUTHORIZED"},401);
       try{
-        const p=JSON.parse(body) as {intent_id:string;itinerary_id:string;alert_class?:"DEAL"|"ADMIN";payload:unknown;actionable?:boolean;provisional_trigger?:boolean};
+        const p=JSON.parse(body) as {itinerary_id:string;provisional_trigger?:boolean;actionable?:boolean;payload?:unknown;intent_id?:string;alert_class?:"DEAL"|"ADMIN"};
         if(Object.prototype.hasOwnProperty.call(p,"actionable"))throw new Error("CLIENT_ACTIONABLE_FORBIDDEN");
+        if(Object.prototype.hasOwnProperty.call(p,"payload")||Object.prototype.hasOwnProperty.call(p,"intent_id"))throw new Error("CLIENT_ALERT_CONTENT_FORBIDDEN");
         if((p.alert_class??"DEAL")!=="DEAL")throw new Error("CANDIDATE_ALERT_CLASS_INVALID");
         const now=new Date().toISOString(); const readiness=await evaluateActionableFromDb(env.DB,p.itinerary_id,now);
         if(!readiness.actionable&&!p.provisional_trigger)return json({ok:true,queued:false,...readiness},200);
-        await enqueueAlertIntent(env.DB,{intent_id:p.intent_id,itinerary_id:p.itinerary_id,alert_class:"DEAL",payload:p.payload},now);
-        return json({ok:true,queued:true,provisional:!readiness.actionable,...readiness},202);
+        const provisional=!readiness.actionable; const payload=await buildCanonicalCandidateAlert(env.DB,p.itinerary_id,now,provisional);
+        const intentId=`${provisional?"provisional":"deal"}:${p.itinerary_id}:${payload.updated_at}`;
+        await enqueueAlertIntent(env.DB,{intent_id:intentId,itinerary_id:p.itinerary_id,alert_class:"DEAL",payload},now);
+        return json({ok:true,queued:true,provisional,intent_id:intentId,...readiness},202);
       }catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/notifications/lease"){
