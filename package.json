@@ -11,7 +11,8 @@
     "check:invariants": "python3 scripts/validate_invariants.py",
     "gates": "python3 scripts/gate_evidence.py",
     "preflight": "python3 scripts/production_preflight.py",
-    "deploy:plan": "python3 scripts/deploy_plan.py"
+    "deploy:plan": "python3 scripts/deploy_plan.py",
+    "check:wrangler": "npm run build && npx --yes wrangler@4.131.2 deploy --dry-run --config wrangler.ci.jsonc"
   },
   "devDependencies": {
     "typescript": "5.8.3"

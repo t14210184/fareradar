@@ -16,5 +16,6 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: npm ci --ignore-scripts
       - run: npm run check:ts
+      - run: npm run check:wrangler
       - run: pytest -q
       - run: python3 scripts/validate_invariants.py

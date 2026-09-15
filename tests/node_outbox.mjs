@@ -6,7 +6,7 @@ class DB { constructor(db){this.db=db} prepare(sql){return new Stmt(this.db.prep
 const raw=new DatabaseSync(':memory:'); for(const f of fs.readdirSync(new URL('../migrations/',import.meta.url)).filter(x=>x.endsWith('.sql')).sort()) raw.exec(fs.readFileSync(new URL(`../migrations/${f}`,import.meta.url),'utf8')); const db=new DB(raw);
 const t0='2026-09-15T00:00:00.000Z';
 await enqueueAlertIntent(db,{intent_id:'deal-1',itinerary_id:'itin-1',alert_class:'DEAL',payload:{x:1}},t0);
-await projectAlertIntents(db,t0); await projectAlertIntents(db,t0);
+await projectAlertIntents(db,t0,10,'PRODUCTION'); await projectAlertIntents(db,t0,10,'PRODUCTION');
 let jobs=await leaseNotifications(db,t0,'w1',10,60);
 raw.prepare("update notification_outbox set lease_until='2026-09-14T23:59:59.000Z' where notification_id='deal-1'").run();
 let reclaimed=await leaseNotifications(db,'2026-09-15T00:02:00.000Z','w2',10,60);
@@ -14,7 +14,7 @@ let wrongNotificationAck=false;try{await ackNotification(db,{notification_id:'de
 let retry=await ackNotification(db,{notification_id:'deal-1',worker_id:'w2',ok:false,retryable:true,error:'500'},'2026-09-15T00:02:00.000Z');
 raw.prepare("update notification_outbox set state='SENDING',attempts=5,claimed_by='w2',lease_until='2026-09-15T02:00:00.000Z' where notification_id='deal-1'").run();
 let dead=await ackNotification(db,{notification_id:'deal-1',worker_id:'w2',ok:false,retryable:false,error:'400'},'2026-09-15T01:00:00.000Z');
-await projectAlertIntents(db,'2026-09-15T01:00:01.000Z');
+await projectAlertIntents(db,'2026-09-15T01:00:01.000Z',10,'PRODUCTION');
 raw.prepare("insert into domain_outbox(event_type,entity_id,payload_json,state,attempts,created_at) values('OBS','o1','{}','PENDING',0,?)").run(t0);
 let ev=await claimDomainEvents(db,t0,'dw1',2,60); raw.prepare("update domain_outbox set lease_until='2026-09-14T23:59:59.000Z' where entity_id='o1'").run(); let ev2=await claimDomainEvents(db,'2026-09-15T00:02:00.000Z','dw2',2,60); let wrongDomainAck=false;try{await ackDomainEvent(db,{id:Number(ev2[0].id),worker_id:'dw1',ok:true},'2026-09-15T00:02:01.000Z')}catch(e){wrongDomainAck=String(e).includes('DOMAIN_EVENT_LEASE_REQUIRED')} let dstate=await ackDomainEvent(db,{id:Number(ev2[0].id),worker_id:'dw2',ok:true},'2026-09-15T00:02:01.000Z'); let dreplay=await ackDomainEvent(db,{id:Number(ev2[0].id),worker_id:'dw2',ok:true},'2026-09-15T00:02:02.000Z');
 const counts={intents:raw.prepare('select count(*) n from candidate_alert_intents').get().n,notifications:raw.prepare('select count(*) n from notification_outbox').get().n,domain_done:raw.prepare("select count(*) n from domain_outbox where state='DONE'").get().n};

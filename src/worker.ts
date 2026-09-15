@@ -29,7 +29,7 @@ import { ingestProviderPricingSnapshot, recordProviderConfirmedOrder } from "./p
 import { buildCanonicalCandidateAlert } from "./alert_runtime.js";
 import { authorizeRequest, principalAllowsPayload, cleanupExpiredNonces, workerTokenAuthorized, workerLeaseAllowsSource, providerLeaseAllowsJob, type AuthEnv } from "./auth.js";
 
-export interface Env extends AuthEnv { WORKER_TOKEN?:string; }
+export interface Env extends AuthEnv { WORKER_TOKEN?:string; FARE_DEPLOYMENT_MODE?:string; FARE_COMMIT_SHA?:string; }
 async function authorized(req:Request,body:string,env:Env){return authorizeRequest(req,body,env);}
 function json(data:unknown,status=200){return new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json"}});}
 
@@ -251,6 +251,6 @@ const worker={
     }
     return json({error:"NOT_FOUND"},404);
   }
-  ,async scheduled(event:any,env:Env):Promise<void>{ const now=new Date().toISOString(); await cleanupExpiredNonces(env.DB,now); if(event?.cron==="*/5 * * * *"){const agencyExpiry=await expireAgencyOffers(env.DB,now,1);if(agencyExpiry.expired)return;const liveExpiry=await expireLiveProviderOffers(env.DB,now,1);if(liveExpiry.processed||liveExpiry.resumed)return;await planDueCandidateSearches(env.DB,now,8,4);await dispatchProviderSearchPlans(env.DB,now,2);await evaluateDueProvisionals(env.DB,now,1);await evaluateDuePromotionBursts(env.DB,now,1);return;} await projectAlertIntents(env.DB,now,10); await projectDomainEvents(env.DB,now,"cron",2); await scheduleDueSources(env.DB,now,10); }
+  ,async scheduled(_event:any,env:Env):Promise<void>{ const now=new Date().toISOString(); await cleanupExpiredNonces(env.DB,now); const minute=new Date(now).getUTCMinutes(); if(minute%5===0){const agencyExpiry=await expireAgencyOffers(env.DB,now,1);if(agencyExpiry.expired)return;const liveExpiry=await expireLiveProviderOffers(env.DB,now,1);if(liveExpiry.processed||liveExpiry.resumed)return;await planDueCandidateSearches(env.DB,now,8,4);await dispatchProviderSearchPlans(env.DB,now,2);await evaluateDueProvisionals(env.DB,now,1);await evaluateDuePromotionBursts(env.DB,now,1);return;} await projectAlertIntents(env.DB,now,10,env.FARE_DEPLOYMENT_MODE??"SHADOW_ACCEPTANCE"); await projectDomainEvents(env.DB,now,"cron",2); await scheduleDueSources(env.DB,now,10); }
 };
 export default worker;

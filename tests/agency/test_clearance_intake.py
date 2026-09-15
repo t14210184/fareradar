@@ -50,7 +50,7 @@ def test_agency_offer_deadline_expiry_revokes_stale_provisional():
     assert x['life']['previous_state']=='CHECKOUT_REPRODUCED' and x['life']['new_state']=='EXPIRED'
     assert x['pendingOld']==0 and x['cancelled']>=1
     assert x['expiryPayload']['kind']=='DEAL-UPDATE' and x['expiryPayload']['bookable'] is False
-    assert x['updateOutbox']['state']=='PENDING' and x['updateOutbox']['payload']['verification_state']=='EXPIRED'
+    assert x['updateOutbox']['state']=='SHADOW_HELD' and x['updateOutbox']['payload']['verification_state']=='EXPIRED'
     assert x['staleLease']==0
     assert x['old']['state']=='EXPIRED' and x['oldQueue']==0
     assert x['oldLife']['reason']=='BOOKING_DEADLINE_PASSED'

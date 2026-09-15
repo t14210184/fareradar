@@ -1,0 +1,9 @@
+{
+  "name": "fare-radar-ci",
+  "main": "dist/worker.js",
+  "compatibility_date": "2026-09-15",
+  "triggers": { "crons": ["* * * * *"] },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "fare-radar-ci", "database_id": "00000000-0000-0000-0000-000000000000" }
+  ]
+}

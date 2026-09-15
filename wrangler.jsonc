@@ -2,7 +2,7 @@
   "name": "fare-radar",
   "main": "dist/worker.js",
   "compatibility_date": "2026-09-15",
-  "triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
+  "triggers": { "crons": ["* * * * *"] },
   "d1_databases": [
     { "binding": "DB", "database_name": "fare-radar-production", "database_id": "REPLACE_WITH_D1_DATABASE_ID" }
   ]

@@ -5,11 +5,11 @@ export async function enqueueAlertIntent(db:D1Database,input:{intent_id:string;i
   await db.prepare("INSERT INTO candidate_alert_intents(intent_id,itinerary_id,alert_class,payload_json,created_at) VALUES(?,?,?,?,?) ON CONFLICT(intent_id) DO NOTHING")
     .bind(input.intent_id,input.itinerary_id,input.alert_class,JSON.stringify(input.payload),nowIso).run();
 }
-export async function projectAlertIntents(db:D1Database,nowIso:string,limit=10){
+export async function projectAlertIntents(db:D1Database,nowIso:string,limit=10,deploymentMode="SHADOW_ACCEPTANCE"){
   const rows=(await db.prepare("SELECT intent_id,alert_class,payload_json FROM candidate_alert_intents WHERE projected_at IS NULL ORDER BY created_at LIMIT ?").bind(limit).all<{intent_id:string;alert_class:string;payload_json:string}>()).results;
   for(const row of rows){
     await db.batch([
-      db.prepare("INSERT INTO notification_outbox(notification_id,channel_class,payload_json,state,attempts,created_at) VALUES(?,?,?,'PENDING',0,?) ON CONFLICT(notification_id) DO NOTHING").bind(row.intent_id,row.alert_class,row.payload_json,nowIso),
+      db.prepare("INSERT INTO notification_outbox(notification_id,channel_class,payload_json,state,attempts,created_at) VALUES(?,?,?,?,0,?) ON CONFLICT(notification_id) DO NOTHING").bind(row.intent_id,row.alert_class,row.payload_json,row.alert_class==="DEAL"&&deploymentMode!=="PRODUCTION"?"SHADOW_HELD":"PENDING",nowIso),
       db.prepare("UPDATE candidate_alert_intents SET projected_at=? WHERE intent_id=? AND projected_at IS NULL").bind(nowIso,row.intent_id)
     ]);
   }
