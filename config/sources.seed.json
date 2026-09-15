@@ -1,0 +1,24 @@
+[
+  {
+    "source_id":"tigerair_tw_official",
+    "source_class":"OFFICIAL_PROMOTION",
+    "canonical_domain_or_account":"tigerairtw.com",
+    "entrypoint_url":"https://www.tigerairtw.com/",
+    "market":"TW","language":"zh-TW","currency":"TWD",
+    "access_basis":"PUBLIC_OFFICIAL_PAGE","fetch_method":"CONDITIONAL_HTTP","lifecycle_state":"SHADOW",
+    "verification_authority":"HIGH_FOR_OWN_TERMS","terms_snapshot_at":"RECHECK_REQUIRED",
+    "min_interval_ms":1800000,"kill_switch":1,"storage_policy":"HASH_AND_STRUCTURED_EXTRACTION",
+    "retention_policy":"PUBLIC_STRUCTURED_90D","parser":"official_promo","owner":"airline"
+  },
+  {
+    "source_id":"peach_tw_official",
+    "source_class":"OFFICIAL_PROMOTION",
+    "canonical_domain_or_account":"flypeach.com",
+    "entrypoint_url":"https://www.flypeach.com/tw",
+    "market":"TW","language":"zh-TW","currency":"TWD",
+    "access_basis":"PUBLIC_OFFICIAL_PAGE","fetch_method":"CONDITIONAL_HTTP","lifecycle_state":"SHADOW",
+    "verification_authority":"HIGH_FOR_OWN_TERMS","terms_snapshot_at":"RECHECK_REQUIRED",
+    "min_interval_ms":1800000,"kill_switch":1,"storage_policy":"HASH_AND_STRUCTURED_EXTRACTION",
+    "retention_policy":"PUBLIC_STRUCTURED_90D","parser":"official_promo","owner":"airline"
+  }
+]

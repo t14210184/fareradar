@@ -32,3 +32,24 @@ export function validateScenarioCost(s:{low:number;base:number;high:number}|null
   if (!s) return true;
   return Number.isFinite(s.low) && Number.isFinite(s.base) && Number.isFinite(s.high) && s.low <= s.base && s.base <= s.high;
 }
+
+
+export function selfTransferAcceptable(input:{documentClear:boolean;baggageFeasible:boolean;scheduledBufferMinutes:number;requiredBufferMinutes:number}){
+  return input.documentClear && input.baggageFeasible && input.scheduledBufferMinutes >= input.requiredBufferMinutes;
+}
+
+export function couponSequenceClear(input:{allCouponsInSequence:boolean;intentionalSkip:boolean}){
+  return input.allCouponsInSequence && !input.intentionalSkip;
+}
+
+export type ProtectionType = "THROUGH_TICKET_CARRIER_PROTECTED"|"INTERLINE_PROTECTED"|"OTA_GUARANTEE"|"SEPARATE_UNPROTECTED"|"UNKNOWN";
+export function protectionClassification(input:{protectionType:ProtectionType;evidenceId?:string|null;samePnr:boolean}){
+  if (!input.evidenceId) return {accepted:false, reason:"EVIDENCE_REQUIRED"};
+  if (input.protectionType === "UNKNOWN") return {accepted:false, reason:"UNKNOWN_PROTECTION"};
+  if (input.samePnr && input.protectionType === "SEPARATE_UNPROTECTED") return {accepted:true, reason:"EXPLICIT_UNPROTECTED"};
+  return {accepted:true, reason:"EVIDENCE_BACKED"};
+}
+
+export function canConfirmFromEvidence(evidence:{kind:"PROMOTION"|"SOCIAL"|"CACHED_FARE"|"LIVE_OFFER"|"SELLER_READBACK";authority:string}[]){
+  return evidence.some(e => e.kind === "LIVE_OFFER" || e.kind === "SELLER_READBACK");
+}
