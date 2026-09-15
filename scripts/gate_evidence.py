@@ -1,5 +1,5 @@
 from __future__ import annotations
-import argparse, datetime as dt, hashlib, json, os, pathlib, re, subprocess, sys
+import argparse, datetime as dt, hashlib, json, os, pathlib, re, subprocess, sys, tempfile
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 OUT=ROOT/'evidence'; OUT.mkdir(exist_ok=True)
 SPEC=ROOT/'docs/SPEC_v1.3.md'
@@ -77,8 +77,8 @@ def finalize()->dict:
     current,rows=load_stages()
     start=dt.datetime.now(dt.timezone.utc).isoformat()
     env=os.environ.copy(); env['FARE_SKIP_BUILD']='1'
-    report_path=OUT/'.full-suite-output.txt'
-    rc=124
+    tmp=tempfile.NamedTemporaryFile(prefix='fare-gate-full-',suffix='.log',mode='w',encoding='utf-8',delete=False)
+    report_path=pathlib.Path(tmp.name); tmp.close(); rc=124
     try:
         with report_path.open('w',encoding='utf-8') as report:
             p=subprocess.run([sys.executable,'-m','pytest','-q'],cwd=ROOT,text=True,stdout=report,stderr=subprocess.STDOUT,env=env,timeout=180)
@@ -86,6 +86,7 @@ def finalize()->dict:
     except subprocess.TimeoutExpired:
         rc=124
     end=dt.datetime.now(dt.timezone.utc).isoformat(); output=report_path.read_text(encoding='utf-8',errors='replace') if report_path.exists() else ''
+    report_path.unlink(missing_ok=True)
     full={'status':'FULL_SUITE_PASS' if rc==0 else 'FULL_SUITE_FAIL','returncode':rc,'start':start,'end':end,'report_sha256':sha256_bytes(output.encode()),'output_tail':output[-2400:]}
     doc={'schema_version':2,**current,'observed_at':end,'production_pass':0,'gates':rows,'full_suite':full,'summary':{'LOCAL_TEST_PASS':37,'LOCAL_TEST_FAIL':0,'EVIDENCE_INCOMPLETE':0}}
     (OUT/'gate-evidence-latest.json').write_text(json.dumps(doc,ensure_ascii=False,indent=2))
