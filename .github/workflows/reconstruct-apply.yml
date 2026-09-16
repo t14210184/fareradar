@@ -13,7 +13,7 @@ jobs:
     steps:
       - name: Verify bundle and atomically promote source branch
         env:
-          BURDLE_URL: "https://sdmntprwestcentralus.oaiusercontent.com/files/00000000-0ac8-81fb-ad1f-8c48022f2d18/raw?se=2026-09-16T02%3A40%3A14Z&sp=r&sv=2026-02-06&sr=b&scid=372350da-ab33-56f4-bdd0-e94f94bb00ff&skoid=0765b554-4b90-4fa2-9d6d-0055a2427910&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-16T00%3A33%3A50Z&ske=2026-09-17T00%3A33%3A50Z&sks=b&skv=2026-02-06&sig=FQGnKmu2gKs/qxHf6DkHEjb5dGSZKimJNuM9TivbUdwm53D"
+          BUNDLE_URL: "https://sdmntprwestcentralus.oaiusercontent.com/files/00000000-0ac8-81fb-ad1f-8c48022f2d18/raw?se=2026-09-16T02%3A40%3A14Z&sp=r&sv=2026-02-06&sr=b&scid=372350da-ab33-56f4-bdd0-e94f94bb00ff&skoid=0765b554-4b90-4fa2-9d6d-0055a2427910&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-16T00%3A33%3A50Z&ske=2026-09-17T00%3A33%3A50Z&sks=b&skv=2026-02-06&sig=FQGnKmu2gKs/qxHf6DkHEjb5dGSZKimJNuM9TivbUdw%3D"
           EXPECTED_SHA: "6ce592ea9a00028c28bdcedaecbee2a03c8fdce918db1ace66fb14cf4c36a95c"
           EXPECTED_HEAD: "df8a25c6547e911fc5294ea6e905eca2aae27f80"
           EXPECTED_PARENT: "7c53e58986606710aa4154f3dc06f0e7c4492b87"
@@ -28,7 +28,7 @@ jobs:
           test "$(git bundle list-heads /tmp/fareradar.bundle | awk '$2=="HEAD"{print $1}')" = "$EXPECTED_HEAD"
           git clone -q /tmp/fareradar.bundle /tmp/src
           test "$(git -C /tmp/src rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test "$(git -C /tmp/src rev-parse HEAD ^)" = "$EXPECTED_PARENT"
+          test "$(git -C /tmp/src rev-parse 'HEAD^')" = "$EXPECTED_PARENT"
           REPO="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           CURRENT="$(git ls-remote "$REPO" refs/heads/reconstruct-v1.3 | awk '{print $1}')"
           test "$CURRENT" = "$EXPECTED_PARENT"
