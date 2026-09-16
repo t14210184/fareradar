@@ -1,0 +1,32 @@
+name: Reconstruct transport
+on:
+  push:
+    branches: [reconstruct-transport]
+    paths: [transport/request.json]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply exact checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL=$(jq -r .bundle_url transport/request.json)
+          SHA=$(jq -r .bundle_sha256 transport/request.json)
+          PARENT=$(jq -r .expected_parent transport/request.json)
+          TARGET=$(jq -r .expected_head transport/request.json)
+          curl --fail --location --retry 2 "$URL" -o /tmp/checkpoint.bundle
+          echo "$SHA  /tmp/checkpoint.bundle" | sha256sum -c -
+          rm -rf /tmp/source
+          git clone "https://github.com/${GITHUB_REPOSITORY}.git" /tmp/source
+          cd /tmp/source
+          git checkout reconstruct-v1.3
+          test "$(git rev-parse HEAD)" = "$PARENT"
+          git fetch /tmp/checkpoint.bundle HEAD
+          test "$(git rev-parse FETCH_HEAD)" = "$TARGET"
+          git merge-base --is-ancestor "$PARENT" "$TARGET"
+          git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force-with-lease=refs/heads/reconstruct-v1.3:$PARENT origin "$TARGET":refs/heads/reconstruct-v1.3
