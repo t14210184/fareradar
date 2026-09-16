@@ -11,4 +11,9 @@ def test_scoped_hmac_nonce_path_body_and_identity_guards():
     assert got['source_mismatch']==403
     assert got['source_cannot_agency']==401 and got['scoped_cannot_generic']==401
     assert got['provider_offer_mismatch']==403 and got['provider_runtime_mismatch']==403
+    assert got['access_reviewer_notification_lease']==401
+    assert got['access_reviewer_source_disable']==401
+    assert got['access_reviewer_provider_search']==401
+    assert got['shadow_reviewer_audit']==401
+    assert got['shadow_reviewer_notification_lease']==401
     assert got['nonces'] >= 3 and got['expired_nonce_count']==0
