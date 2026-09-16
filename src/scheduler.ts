@@ -14,20 +14,21 @@ export async function scheduleDueSources(db:D1Database,nowIso:string,limit=10){
     LEFT JOIN source_health_windows h ON h.source_id=s.source_id AND h.window_date=?
     WHERE s.lifecycle_state IN ('ENABLED','SHADOW') AND s.kill_switch=0 AND s.entrypoint_url IS NOT NULL
     ORDER BY COALESCE(f.last_attempt_at,'') ASC LIMIT ?`).bind(day(nowIso),limit).all<any>()).results;
-  let inserted=0;
-  for(const r of rows){
-    if(!termsCurrent(r.terms_snapshot_at)||r.schedule_action==="QUARANTINE")continue;
+  const due=rows.flatMap(r=>{
+    if(!termsCurrent(r.terms_snapshot_at)||r.schedule_action==="QUARANTINE")return [];
     const interval=dueInterval(Number(r.min_interval_ms)||300000,String(r.schedule_action));
-    if(r.last_attempt_at && now-Date.parse(r.last_attempt_at)<interval)continue;
+    if(r.last_attempt_at && now-Date.parse(r.last_attempt_at)<interval)return [];
     const jobId=`source:${r.source_id}:${bucket(now,interval)}`;
-    const payload={source_id:r.source_id,url:r.entrypoint_url,fetch_method:r.fetch_method};
-    const res=await db.prepare("INSERT OR IGNORE INTO verification_jobs(job_id,job_type,target_class,source_id,payload_json,state,available_at,created_at) VALUES(?, 'SOURCE_FETCH','EXTERNAL_HEAVY',?,?,'PENDING',?,?)")
-      .bind(jobId,r.source_id,JSON.stringify(payload),nowIso,nowIso).run();
-    await db.prepare("INSERT INTO source_fetch_state(source_id,last_attempt_at,consecutive_failures,updated_at) VALUES(?,?,0,?) ON CONFLICT(source_id) DO UPDATE SET last_attempt_at=excluded.last_attempt_at,updated_at=excluded.updated_at")
-      .bind(r.source_id,nowIso,nowIso).run();
-    inserted += Number((res.meta as any)?.changes??1)>0?1:0;
-  }
-  return {considered:rows.length,inserted};
+    return [{...r,jobId,payload:JSON.stringify({source_id:r.source_id,url:r.entrypoint_url,fetch_method:r.fetch_method})}];
+  });
+  if(!due.length)return {considered:rows.length,inserted:0};
+  const jobValues=due.map(()=>"(?, 'SOURCE_FETCH','EXTERNAL_HEAVY',?,?,'PENDING',?,?)").join(",");
+  const jobArgs=due.flatMap(r=>[r.jobId,r.source_id,r.payload,nowIso,nowIso]);
+  const res=await db.prepare(`INSERT OR IGNORE INTO verification_jobs(job_id,job_type,target_class,source_id,payload_json,state,available_at,created_at) VALUES ${jobValues}`).bind(...jobArgs).run();
+  const stateValues=due.map(()=>"(?,?,0,?)").join(",");
+  const stateArgs=due.flatMap(r=>[r.source_id,nowIso,nowIso]);
+  await db.prepare(`INSERT INTO source_fetch_state(source_id,last_attempt_at,consecutive_failures,updated_at) VALUES ${stateValues} ON CONFLICT(source_id) DO UPDATE SET last_attempt_at=excluded.last_attempt_at,updated_at=excluded.updated_at`).bind(...stateArgs).run();
+  return {considered:rows.length,inserted:Number((res.meta as any)?.changes??due.length)};
 }
 
 export async function completeSourceFetch(db:D1Database,input:{source_id:string;success:boolean;duplicate?:boolean;schema_drift?:boolean;etag?:string|null;last_modified?:string|null;content_sha256?:string|null},nowIso:string){

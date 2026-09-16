@@ -9,12 +9,12 @@ export type DeploymentMode="SHADOW_ACCEPTANCE"|"PRODUCTION";
 export function normalizeDeploymentMode(raw:string|undefined):DeploymentMode{return raw==="PRODUCTION"?"PRODUCTION":"SHADOW_ACCEPTANCE";}
 export async function projectAlertIntents(db:D1Database,nowIso:string,limit=10,mode:DeploymentMode="PRODUCTION"){
   const rows=(await db.prepare("SELECT intent_id,alert_class,payload_json FROM candidate_alert_intents WHERE projected_at IS NULL ORDER BY created_at LIMIT ?").bind(limit).all<{intent_id:string;alert_class:string;payload_json:string}>()).results;
-  for(const row of rows){
-    await db.batch([
-      db.prepare("INSERT INTO notification_outbox(notification_id,channel_class,payload_json,state,attempts,created_at) VALUES(?,?,?,?,0,?) ON CONFLICT(notification_id) DO NOTHING").bind(row.intent_id,row.alert_class,row.payload_json,row.alert_class==="ADMIN"||mode==="PRODUCTION"?"PENDING":"SHADOW_HELD",nowIso),
-      db.prepare("UPDATE candidate_alert_intents SET projected_at=? WHERE intent_id=? AND projected_at IS NULL").bind(nowIso,row.intent_id)
-    ]);
-  }
+  if(!rows.length)return 0;
+  const values=rows.map(()=>"(?,?,?,?,0,?)").join(",");
+  const insertArgs=rows.flatMap(row=>[row.intent_id,row.alert_class,row.payload_json,row.alert_class==="ADMIN"||mode==="PRODUCTION"?"PENDING":"SHADOW_HELD",nowIso]);
+  await db.prepare(`INSERT INTO notification_outbox(notification_id,channel_class,payload_json,state,attempts,created_at) VALUES ${values} ON CONFLICT(notification_id) DO NOTHING`).bind(...insertArgs).run();
+  const ids=rows.map(()=>"?").join(",");
+  await db.prepare(`UPDATE candidate_alert_intents SET projected_at=? WHERE projected_at IS NULL AND intent_id IN (${ids})`).bind(nowIso,...rows.map(row=>row.intent_id)).run();
   return rows.length;
 }
 export async function leaseNotifications(db:D1Database,nowIso:string,workerId:string,limit=10,leaseSeconds=60){

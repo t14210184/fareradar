@@ -251,6 +251,15 @@ const worker={
     }
     return json({error:"NOT_FOUND"},404);
   }
-  ,async scheduled(event:any,env:Env):Promise<void>{ const now=new Date().toISOString(); await cleanupExpiredNonces(env.DB,now); if(event?.cron==="*/5 * * * *"){const agencyExpiry=await expireAgencyOffers(env.DB,now,1);if(agencyExpiry.expired)return;const liveExpiry=await expireLiveProviderOffers(env.DB,now,1);if(liveExpiry.processed||liveExpiry.resumed)return;await planDueCandidateSearches(env.DB,now,8,4);await dispatchProviderSearchPlans(env.DB,now,2);await evaluateDueProvisionals(env.DB,now,1);await evaluateDuePromotionBursts(env.DB,now,1);return;} await projectAlertIntents(env.DB,now,10,normalizeDeploymentMode(env.FARE_DEPLOYMENT_MODE)); await projectDomainEvents(env.DB,now,"cron",2); await scheduleDueSources(env.DB,now,10); }
+  ,async scheduled(event:any,env:Env):Promise<void>{
+    const scheduledMs=Number(event?.scheduledTime); const tick=Number.isFinite(scheduledMs)&&scheduledMs>0?new Date(scheduledMs):new Date(); const now=tick.toISOString();
+    await cleanupExpiredNonces(env.DB,now);
+    if(tick.getUTCMinutes()%5===0){
+      const agencyExpiry=await expireAgencyOffers(env.DB,now,1);if(agencyExpiry.expired)return;
+      const liveExpiry=await expireLiveProviderOffers(env.DB,now,1);if(liveExpiry.processed||liveExpiry.resumed)return;
+      await planDueCandidateSearches(env.DB,now,8,4);await dispatchProviderSearchPlans(env.DB,now,2);await evaluateDueProvisionals(env.DB,now,1);await evaluateDuePromotionBursts(env.DB,now,1);return;
+    }
+    await projectAlertIntents(env.DB,now,10,normalizeDeploymentMode(env.FARE_DEPLOYMENT_MODE)); await projectDomainEvents(env.DB,now,"cron",2); await scheduleDueSources(env.DB,now,10);
+  }
 };
 export default worker;
