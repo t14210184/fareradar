@@ -13,6 +13,7 @@ import { recordAuditEvidence, readAuditEvidence, recordSourceDiscoveryEdge } fro
 import { leaseCandidateSignals, ackCandidateSignal } from "./priority.js";
 import { applySourceOnboardingReview, disableSource } from "./source_onboarding.js";
 import { applyProviderAccessReview, readAccessReview, requireRuntimeCommit } from "./access_reviews.js";
+import { writeShadowReview, readShadowReview, recordShadowRuntimeDay, shadowAcceptanceReadback, requireShadowCommit } from "./shadow_acceptance.js";
 import { recordProviderRuntimeReadback, providerReady } from "./provider_runtime.js";
 import { enqueueProviderSearch, leaseProviderJobs, completeProviderJob } from "./provider_jobs.js";
 import { upsertSearchCampaign, planSearchesForQueue, planDueCandidateSearches, dispatchProviderSearchPlans } from "./search_planner.js";
@@ -167,6 +168,18 @@ const worker={
       const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401); if(principal.role!=="ACCESS_REVIEWER")return json({error:"ACCESS_REVIEWER_REQUIRED"},403);
       try{const payload=JSON.parse(body);const entityType=payload.kind==="source"?"SOURCE":payload.kind==="provider"?"PROVIDER":"";if(!accessScopeAllows(principal,entityType,payload.entity_id))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json(await readAccessReview(env.DB,payload));}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
+    if(req.method==="POST"&&u.pathname==="/shadow/reviews"){
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401); if(principal.role!=="SHADOW_REVIEWER")return json({error:"SHADOW_REVIEWER_REQUIRED"},403);
+      try{if(normalizeDeploymentMode(env.FARE_DEPLOYMENT_MODE)!=="SHADOW_ACCEPTANCE")return json({error:"SHADOW_REVIEW_MODE_REQUIRED"},409);const commit=requireShadowCommit(env.FARE_COMMIT_SHA);return json({ok:true,...await writeShadowReview(env.DB,JSON.parse(body),{reviewer_key_id:principal.key_id,runtime_commit:commit},new Date().toISOString())},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m.includes("CONFLICT")?409:m==="RUNTIME_COMMIT_UNAVAILABLE"?503:400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/shadow/reviews/readback"){
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401); if(principal.role!=="SHADOW_REVIEWER")return json({error:"SHADOW_REVIEWER_REQUIRED"},403);
+      try{const payload=JSON.parse(body);return json({review:await readShadowReview(env.DB,payload.sample_id)});}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/shadow/acceptance/readback"){
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401); if(principal.role!=="SHADOW_REVIEWER")return json({error:"SHADOW_REVIEWER_REQUIRED"},403);
+      try{const commit=requireShadowCommit(env.FARE_COMMIT_SHA);return json(await shadowAcceptanceReadback(env.DB,commit,normalizeDeploymentMode(env.FARE_DEPLOYMENT_MODE)));}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==="RUNTIME_COMMIT_UNAVAILABLE"?503:400);}
+    }
     if(req.method==="POST"&&u.pathname==="/sources/disable"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
       try{return json({ok:true,...await disableSource(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
@@ -280,6 +293,7 @@ const worker={
   ,async scheduled(event:any,env:Env):Promise<void>{
     const scheduledMs=Number(event?.scheduledTime); const tick=Number.isFinite(scheduledMs)&&scheduledMs>0?new Date(scheduledMs):new Date(); const now=tick.toISOString();
     await cleanupExpiredNonces(env.DB,now);
+    await recordShadowRuntimeDay(env.DB,env.FARE_COMMIT_SHA,normalizeDeploymentMode(env.FARE_DEPLOYMENT_MODE),now);
     if(tick.getUTCMinutes()%5===0){
       const agencyExpiry=await expireAgencyOffers(env.DB,now,1);if(agencyExpiry.expired)return;
       const liveExpiry=await expireLiveProviderOffers(env.DB,now,1);if(liveExpiry.processed||liveExpiry.resumed)return;

@@ -17,7 +17,7 @@ function parseSecrets(raw:string|undefined){if(!raw)return {} as Record<string,s
 function timeValid(value:string|null|undefined,now:number,before:boolean){if(!value)return true;const t=Date.parse(value);if(!Number.isFinite(t))return false;return before?t<=now:t>now;}
 function pathAllowed(raw:string,path:string){try{const xs=JSON.parse(raw);return Array.isArray(xs)&&xs.some(x=>typeof x==="string"&&x.startsWith("/")&&(x.endsWith("/")?path.startsWith(x):path===x));}catch{return false;}}
 const ACCESS_REVIEWER_PATHS=new Set(["/audit/evidence","/audit/evidence/readback","/sources/onboarding/review","/providers/access/review","/access/reviews/readback"]);
-const SHADOW_REVIEWER_PATHS=new Set(["/shadow/reviews","/shadow/reviews/readback"]);
+const SHADOW_REVIEWER_PATHS=new Set(["/shadow/reviews","/shadow/reviews/readback","/shadow/acceptance/readback"]);
 export function principalRoleAllowsPath(role:string,path:string){
   if(role==="ACCESS_REVIEWER")return ACCESS_REVIEWER_PATHS.has(path);
   if(role==="SHADOW_REVIEWER")return SHADOW_REVIEWER_PATHS.has(path);
