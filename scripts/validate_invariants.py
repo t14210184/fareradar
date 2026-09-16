@@ -12,7 +12,7 @@ required={
 'readiness_facets':{'facet_type','status','expires_at','authority','evidence_id'},
 'document_requirements':{'jurisdiction','travel_event','traveler_document_class','valid_for_event_at','authority_source','source_snapshot_id'},
 'four_leg_liabilities':{'cycle_id','component_type','remaining_exposure','recoverable_amount'},
-'audit_evidence':{'gate_id','spec_version','test_report_hash','provider_readback','unresolved_items'},
+'audit_evidence':{'gate_id','spec_version','test_report_hash','provider_readback','unresolved_items','entity_type','entity_id','review_id','reviewer_key_id'},
 'source_registry':{'source_id','owner_type','source_class','canonical_domain_or_account','market','language','currency','route_scope','access_basis','fetch_method','push_capable','discovery_trust','verification_authority','lead_score','yield_score','fare_freshness','requires_repricing','parser','terms_snapshot_at','privacy_class','retention_policy','min_interval_ms','max_burst','backoff_policy','kill_switch_state','last_success_at','last_unique_deal_at','status'},
 'source_observations':{'observation_id','source_id','canonical_url','published_at','observed_at','content_sha256','content_version','raw_ref','parser_version','access_basis_snapshot','retention_until','deleted_at_source','correction_of_observation_id'},
 'promotion_events':{'event_id','promotion_type','carrier_or_seller','market','route_scope','sale_window','travel_window','price_claim','currency','promo_code','member_requirement','channel_requirement','state','first_observed_at','last_observed_at','cluster_fingerprint','primary_evidence_id'},
@@ -41,7 +41,11 @@ required={
 'connection_buffer_policies':{'policy_id','airport','airport_base_buffer','immigration_margin','baggage_reclaim_margin','terminal_transfer_margin','checkin_cutoff_margin','security_margin','delay_margin','buffer_confidence','authority','observed_at','expires_at','raw_sha256'},
 'airport_change_policies':{'policy_id','from_airport','to_airport','ground_transfer_minutes','ground_contingency_minutes','authority','observed_at','expires_at','raw_sha256'},
 'ingest_auth_keys':{'key_id','role','source_id','agency_id','secret_slot','allowed_paths_json','enabled','not_before','expires_at'},
-'used_request_nonces':{'key_id','nonce','request_sha256','used_at','expires_at'} }
+'used_request_nonces':{'key_id','nonce','request_sha256','used_at','expires_at'},
+'source_onboarding_reviews':{'review_id','source_id','evidence_id','reviewer_key_id','human_review_sha256','payload_sha256'},
+'provider_access_reviews':{'review_id','provider_id','access_basis','terms_snapshot_at','rate_policy','evidence_id','reviewer_key_id','human_review_sha256','payload_sha256'},
+'shadow_review_samples':{'sample_id','subject_type','subject_id','evidence_id','reviewer_key_id','review_payload_sha256','commit_sha'},
+'shadow_runtime_days':{'commit_sha','runtime_date','deployment_mode','observed_at'} }
 for table, cols in required.items():
     got={r[1] for r in db.execute(f'pragma table_info({table})')}
     missing=cols-got

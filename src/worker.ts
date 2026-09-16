@@ -9,9 +9,10 @@ import { leaseAgencyCheckouts, completeAgencyCheckout } from "./agency_checkout.
 import { expireAgencyOffers } from "./agency_expiry.js";
 import { expireLiveProviderOffers } from "./offer_lifecycle.js";
 import { ingestOfferSnapshot } from "./offers.js";
-import { recordAuditEvidence, recordSourceDiscoveryEdge } from "./audit.js";
+import { recordAuditEvidence, readAuditEvidence, recordSourceDiscoveryEdge } from "./audit.js";
 import { leaseCandidateSignals, ackCandidateSignal } from "./priority.js";
 import { applySourceOnboardingReview, disableSource } from "./source_onboarding.js";
+import { applyProviderAccessReview, readAccessReview, requireRuntimeCommit } from "./access_reviews.js";
 import { recordProviderRuntimeReadback, providerReady } from "./provider_runtime.js";
 import { enqueueProviderSearch, leaseProviderJobs, completeProviderJob } from "./provider_jobs.js";
 import { upsertSearchCampaign, planSearchesForQueue, planDueCandidateSearches, dispatchProviderSearchPlans } from "./search_planner.js";
@@ -32,14 +33,31 @@ import { authorizeRequest, principalAllowsPayload, cleanupExpiredNonces, workerT
 export interface Env extends AuthEnv { WORKER_TOKEN?:string; FARE_DEPLOYMENT_MODE?:string; FARE_COMMIT_SHA?:string; }
 async function authorized(req:Request,body:string,env:Env){return authorizeRequest(req,body,env);}
 function json(data:unknown,status=200){return new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json"}});}
+function accessScopeAllows(principal:{source_id:string|null;provider_id:string|null},entityType:string,entityId:string){if(entityType==="SOURCE")return !principal.source_id||principal.source_id===entityId;if(entityType==="PROVIDER")return !principal.provider_id||principal.provider_id===entityId;return false;}
+function emptyUnresolved(v:unknown){return Array.isArray(v)&&v.length===0;}
 
 const worker={
   async fetch(req:Request,env:Env):Promise<Response>{
     const u=new URL(req.url);
     if(req.method==="GET"&&u.pathname==="/health")return json({ok:true,spec:"1.3",deployment_mode:normalizeDeploymentMode(env.FARE_DEPLOYMENT_MODE),commit_sha:env.FARE_COMMIT_SHA??null});
     if(req.method==="POST"&&u.pathname==="/audit/evidence"){
-      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
-      try{return json({ok:true,...await recordAuditEvidence(env.DB,JSON.parse(body))},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==='AUDIT_EVIDENCE_CONFLICT'?409:400);}
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401);
+      try{
+        const payload=JSON.parse(body);
+        const reviewStages=new Set(["TERMS_AND_PRIVACY_REVIEW","ACCESS_BASIS_REVIEW"]);
+        if(principal.role==="ACCESS_REVIEWER"){
+          const commit=requireRuntimeCommit(env.FARE_COMMIT_SHA);
+          if(!reviewStages.has(payload.gate_id))return json({error:"ACCESS_REVIEWER_FINAL_GATE_FORBIDDEN"},403);
+          const expectedType=payload.gate_id==="TERMS_AND_PRIVACY_REVIEW"?"SOURCE":"PROVIDER";
+          if(payload.spec_version!=="1.3"||payload.commit_sha!==commit||payload.entity_type!==expectedType||!payload.entity_id||!payload.review_id||!emptyUnresolved(payload.unresolved_items)||!accessScopeAllows(principal,payload.entity_type,payload.entity_id))return json({error:"ACCESS_REVIEW_EVIDENCE_SCOPE_MISMATCH"},403);
+          payload.reviewer_key_id=principal.key_id;
+        }else if(reviewStages.has(payload.gate_id))return json({error:"ACCESS_REVIEWER_REQUIRED"},403);
+        return json({ok:true,...await recordAuditEvidence(env.DB,payload)},202);
+      }catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==='AUDIT_EVIDENCE_CONFLICT'?409:m==='RUNTIME_COMMIT_UNAVAILABLE'?503:400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/audit/evidence/readback"){
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401); if(principal.role!=="ACCESS_REVIEWER")return json({error:"ACCESS_REVIEWER_REQUIRED"},403);
+      try{const payload=JSON.parse(body);const evidence=await readAuditEvidence(env.DB,payload.evidence_id);if(evidence&&(!evidence.entity_type||!evidence.entity_id||!accessScopeAllows(principal,evidence.entity_type,evidence.entity_id)))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json({evidence});}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/source-discovery/edge"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
@@ -138,8 +156,16 @@ const worker={
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401); const p=JSON.parse(body); if(!p.worker_id)return json({error:"WORKER_ID_REQUIRED"},400); try{return json({state:await ackCandidateSignal(env.DB,p,new Date().toISOString())});}catch(e){return json({error:e instanceof Error?e.message:String(e)},409);}
     }
     if(req.method==="POST"&&u.pathname==="/sources/onboarding/review"){
-      const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
-      try{return json({ok:true,...await applySourceOnboardingReview(env.DB,JSON.parse(body),new Date().toISOString())},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m.includes("IDEMPOTENCY_CONFLICT")?409:400);}
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401); if(principal.role!=="ACCESS_REVIEWER")return json({error:"ACCESS_REVIEWER_REQUIRED"},403);
+      try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);const commit=requireRuntimeCommit(env.FARE_COMMIT_SHA);return json({ok:true,...await applySourceOnboardingReview(env.DB,payload,new Date().toISOString(),{reviewer_key_id:principal.key_id,runtime_commit:commit})},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m.includes("IDEMPOTENCY_CONFLICT")?409:m==="RUNTIME_COMMIT_UNAVAILABLE"?503:400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/providers/access/review"){
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401); if(principal.role!=="ACCESS_REVIEWER")return json({error:"ACCESS_REVIEWER_REQUIRED"},403);
+      try{const payload=JSON.parse(body);if(!principalAllowsPayload(principal,payload,u.pathname))return json({error:"AUTH_SCOPE_MISMATCH"},403);const commit=requireRuntimeCommit(env.FARE_COMMIT_SHA);return json({ok:true,...await applyProviderAccessReview(env.DB,payload,{reviewer_key_id:principal.key_id,runtime_commit:commit},new Date().toISOString())},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m.includes("IDEMPOTENCY_CONFLICT")?409:m==="RUNTIME_COMMIT_UNAVAILABLE"?503:400);}
+    }
+    if(req.method==="POST"&&u.pathname==="/access/reviews/readback"){
+      const body=await req.text(); const principal=await authorized(req,body,env); if(!principal)return json({error:"UNAUTHORIZED"},401); if(principal.role!=="ACCESS_REVIEWER")return json({error:"ACCESS_REVIEWER_REQUIRED"},403);
+      try{const payload=JSON.parse(body);const entityType=payload.kind==="source"?"SOURCE":payload.kind==="provider"?"PROVIDER":"";if(!accessScopeAllows(principal,entityType,payload.entity_id))return json({error:"AUTH_SCOPE_MISMATCH"},403);return json(await readAccessReview(env.DB,payload));}catch(e){return json({error:e instanceof Error?e.message:String(e)},400);}
     }
     if(req.method==="POST"&&u.pathname==="/sources/disable"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);

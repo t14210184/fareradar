@@ -46,6 +46,8 @@ export function principalAllowsPayload(p:AuthPrincipal,payload:any,path:string){
   if(p.legacy)return true;
   if((path==="/ingest/agency"||path==="/agency-rechecks/lease"||path==="/agency-rechecks/complete"||path==="/agency-checkouts/lease"||path==="/agency-checkouts/complete")&&p.agency_id&&payload?.agency_id!==p.agency_id)return false;
   if((path==="/ingest/email"||path==="/ingest")&&p.source_id&&payload?.source_id!==p.source_id)return false;
+  if(path==="/sources/onboarding/review"&&p.source_id&&payload?.source_id!==p.source_id)return false;
+  if(path==="/providers/access/review"&&p.provider_id&&payload?.provider_id!==p.provider_id)return false;
   if(p.provider_id){
     const providerPaths=new Set(["/offers/ingest","/pricing-quotes/ingest","/providers/runtime/readback","/provider-jobs/lease","/provider-jobs/complete","/provider-search/enqueue","/checkout-reprice/enqueue","/payment-profiles/upsert"]);
     if(providerPaths.has(path)){const claimed=payload?.provider_id??payload?.provider;if(claimed!==p.provider_id)return false;}
