@@ -68,3 +68,9 @@ node tests/node_live_offer_expiry_redundant.mjs
 ```
 
 The capacity fixtures require the normal five-minute path to stay at or below the internal 40-query target; lifecycle work preempts optional work for that tick.
+
+## Shadow review transport and retry safety
+
+Human-authored Shadow labels stay outside the public repository. Validate or submit an exact JSONL file with `npm run shadow:review -- --input /private/shadow-reviews.jsonl [--dry-run]` and private `FARE_HMAC_KEY_ID` / `FARE_HMAC_SECRET` credentials. The client requires a clean exact HEAD and verifies `/health` is `spec=1.3`, `SHADOW_ACCEPTANCE`, and the same commit before any review operation. Duplicate `sample_id` values and duplicate canonical review units are rejected locally.
+
+Every review mutation is readback-first through `/shadow/reviews/readback`. An already-present exact row is confirmed and never resent; an absent row permits one bounded write; a mismatched row fails closed. After a successful write the exact row is read back again. A transport timeout is reconciled immediately with the same readback endpoint: exact state is accepted as confirmed, absent state is reported as unknown/not-applied without an in-process resend, and mismatched state is ambiguous and blocks progress. Rerun only the identical JSONL so the next attempt begins with the same pre-readback fence. The client finishes by reading `/shadow/acceptance/readback`; it never synthesizes labels or safety judgments to satisfy thresholds.
