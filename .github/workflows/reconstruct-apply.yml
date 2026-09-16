@@ -13,10 +13,10 @@ jobs:
     steps:
       - name: Verify bundle and atomically promote source branch
         env:
-          BUNDLE_URL: "https://sdmntprwestcentralus.oaiusercontent.com/files/00000000-0ac8-81fb-ad1f-8c48022f2d18/raw?se=2026-09-16T02%3A40%3A14Z&sp=r&sv=2026-02-06&sr=b&scid=372350da-ab33-56f4-bdd0-e94f94bb00ff&skoid=0765b554-4b90-4fa2-9d6d-0055a2427910&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-16T00%3A33%3A50Z&ske=2026-09-17T00%3A33%3A50Z&sks=b&skv=2026-02-06&sig=FQGnKmu2gKs/qxHf6DkHEjb5dGSZKimJNuM9TivbUdw%3D"
-          EXPECTED_SHA: "6ce592ea9a00028c28bdcedaecbee2a03c8fdce918db1ace66fb14cf4c36a95c"
-          EXPECTED_HEAD: "df8a25c6547e911fc5294ea6e905eca2aae27f80"
-          EXPECTED_PARENT: "7c53e58986606710aa4154f3dc06f0e7c4492b87"
+          BUNDLE_URL: "https://sdmntprwestcentralus.oaiusercontent.com/files/00000000-d558-81fb-9138-d96a12a5d691/raw?se=2026-09-16T02%3A54%3A05Z&sp=r&sv=2026-02-06&sr=b&scid=de0ae37a-4868-5dad-aac4-e40344b3ea18&skoid=0765b554-4b90-4fa2-9d6d-0055a2427910&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-15T23%3A41%3A02Z&ske=2026-09-16T23%3A41%3A02Z&sks=b&skv=2026-02-06&sig=rm/Tt1EQWpLA4141ekyasccujYIvWdubayLJ9RZjkz4%3D"
+          EXPECTED_SHA: "50adff148e7563ae302f269bbe85c0dc6a93cb903da9ea49aefdd5f7cea6fc9b"
+          EXPECTED_HEAD: "9bbd160790b0fcd4a0ec98bc1b8ab17b449ce9a6"
+          EXPECTED_PARENT: "df8a25c6547e911fc5294ea6e905eca2aae27f80"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
