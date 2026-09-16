@@ -19,11 +19,37 @@ def evidence_recent(data,max_hours=24,now=None):
         seen=dt.datetime.fromisoformat(str(data['observed_at']).replace('Z','+00:00')); now=now or dt.datetime.now(dt.timezone.utc)
         return seen.tzinfo is not None and dt.timedelta(0) <= now-seen <= dt.timedelta(hours=max_hours)
     except:return False
+def _hash_paths(paths):
+    import hashlib
+    h=hashlib.sha256()
+    for path in sorted(paths,key=lambda p:p.as_posix()):
+        rel=path.relative_to(ROOT).as_posix().encode(); data=path.read_bytes(); h.update(len(rel).to_bytes(4,'big')); h.update(rel); h.update(len(data).to_bytes(8,'big')); h.update(data)
+    return h.hexdigest()
+def _current_evidence_context(head):
+    import hashlib
+    tests=subprocess.check_output(['git','ls-files','tests'],cwd=ROOT,text=True).splitlines()
+    return {'commit_sha':head,'spec_sha256':hashlib.sha256((ROOT/'docs/SPEC_v1.3.md').read_bytes()).hexdigest(),'dependency_lock_sha256':_hash_paths([ROOT/'package-lock.json',ROOT/'requirements-dev.txt']),'test_corpus_sha256':_hash_paths([ROOT/x for x in tests if (ROOT/x).is_file()])}
+def _spec_gate_mapping():
+    text=(ROOT/'docs/SPEC_v1.3.md').read_text(); m=re.search(r'## 43\.2 Gate-to-test executable mapping\n(.*?)(?:\n## 43\.3 )',text,re.S)
+    if not m:return []
+    rows=[]
+    for line in m.group(1).splitlines():
+        mm=re.match(r'\|\s*(PG\d{2})\s*\|\s*`([^`]+)`\s*\|\s*(.*?)\s*\|$',line)
+        if mm:rows.append((mm.group(1),mm.group(2),mm.group(3)))
+    return rows
+def code_ready_from_evidence(d,head):
+    if not head or not d or d.get('schema_version')!=2:return False
+    if any(d.get(k)!=v for k,v in _current_evidence_context(head).items()):return False
+    s=d.get('summary',{}); gates=d.get('gates',[]); mapping=_spec_gate_mapping()
+    if len(mapping)!=37 or [x[0] for x in mapping]!=[f'PG{i:02d}' for i in range(37)]:return False
+    if not (s.get('LOCAL_TEST_PASS')==37 and s.get('LOCAL_TEST_FAIL')==0 and s.get('EVIDENCE_INCOMPLETE')==0 and len(gates)==37):return False
+    for g,(gid,cmd,threshold) in zip(gates,mapping):
+        if g.get('gate_id')!=gid or g.get('exact_command')!=cmd or g.get('expected_threshold')!=threshold or g.get('status')!='LOCAL_TEST_PASS' or g.get('commit_sha')!=head:return False
+        if not re.fullmatch(r'[0-9a-f]{64}',str(g.get('report_sha256',''))):return False
+    full=d.get('full_suite',{})
+    return full.get('status')=='FULL_SUITE_PASS' and full.get('stage_count')==5 and full.get('file_count',0)>0 and bool(re.fullmatch(r'[0-9a-f]{64}',str(full.get('report_sha256',''))))
 def code_ready(head=None):
-    head=head or git_head(); d=load_json(ROOT/'evidence/gate-evidence-latest.json') or {}; s=d.get('summary',{})
-    if not head or d.get('commit_sha')!=head:return False
-    if not (s.get('LOCAL_TEST_PASS')==37 and s.get('LOCAL_TEST_FAIL')==0 and s.get('EVIDENCE_INCOMPLETE')==0):return False
-    return all(g.get('commit_sha')==head and g.get('status')=='LOCAL_TEST_PASS' for g in d.get('gates',[])) and len(d.get('gates',[]))==37
+    head=head or git_head(); return code_ready_from_evidence(load_json(ROOT/'evidence/gate-evidence-latest.json') or {},head)
 def d1_id():
     txt=(ROOT/'wrangler.jsonc').read_text(); m=re.search(r'"database_id"\s*:\s*"([^"]+)"',txt); return m.group(1) if m else ''
 def provider_evidence(name):return load_json(ROOT/'evidence/provider'/f'{name}.json')
