@@ -82,7 +82,7 @@ export async function expireLiveProviderOffers(db:D1Database,nowIso:string,limit
     db.prepare("UPDATE itinerary_candidates SET verification_state='PROBABLE',updated_at=? WHERE itinerary_id=?").bind(nowIso,itineraryId),
     db.prepare(`UPDATE readiness_facets SET status='STALE',reason_code='LIVE_OFFER_EXPIRED',observed_at=?,expires_at=?,authority='SYSTEM_EVIDENCE',evidence_id=? WHERE itinerary_id=? AND facet_type='FARE_VERIFIED'`).bind(nowIso,nowIso,eventId,itineraryId),
     db.prepare("UPDATE candidate_alert_intents SET projected_at=? WHERE itinerary_id=? AND alert_class='DEAL' AND projected_at IS NULL").bind(nowIso,itineraryId),
-    db.prepare("UPDATE notification_outbox SET state='CANCELLED',lease_until=NULL,last_error='LIVE_OFFER_EXPIRED' WHERE notification_id IN (SELECT intent_id FROM candidate_alert_intents WHERE itinerary_id=? AND alert_class='DEAL') AND state='PENDING'").bind(itineraryId)
+    db.prepare("UPDATE notification_outbox SET state='CANCELLED',lease_until=NULL,last_error='LIVE_OFFER_EXPIRED' WHERE notification_id IN (SELECT intent_id FROM candidate_alert_intents WHERE itinerary_id=? AND alert_class='DEAL') AND state IN ('PENDING','SHADOW_HELD')").bind(itineraryId)
   ]);
   const event=await db.prepare("SELECT * FROM live_offer_lifecycle_events WHERE event_id=?").bind(eventId).first<LifecycleRow>();
   if(!event)throw new Error("LIVE_OFFER_LIFECYCLE_EVENT_MISSING");

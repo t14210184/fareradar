@@ -1,6 +1,6 @@
 import type { CandidatePlanInput, D1Database } from "./types.js";
 import { persistCandidatePlan } from "./intake.js";
-import { enqueueAlertIntent, projectAlertIntents, leaseNotifications, ackNotification, claimDomainEvents, ackDomainEvent } from "./outbox.js";
+import { enqueueAlertIntent, projectAlertIntents, leaseNotifications, ackNotification, claimDomainEvents, ackDomainEvent, normalizeDeploymentMode } from "./outbox.js";
 import { scheduleDueSources, completeSourceFetch, leaseVerificationJobs, completeVerificationJob } from "./scheduler.js";
 import { ingestSourceObservation, projectDomainEvents } from "./ingest.js";
 import { ingestAgencyOffer, ingestEmailEvidence } from "./partner_ingest.js";
@@ -29,14 +29,14 @@ import { ingestProviderPricingSnapshot, recordProviderConfirmedOrder } from "./p
 import { buildCanonicalCandidateAlert } from "./alert_runtime.js";
 import { authorizeRequest, principalAllowsPayload, cleanupExpiredNonces, workerTokenAuthorized, workerLeaseAllowsSource, providerLeaseAllowsJob, type AuthEnv } from "./auth.js";
 
-export interface Env extends AuthEnv { WORKER_TOKEN?:string; }
+export interface Env extends AuthEnv { WORKER_TOKEN?:string; FARE_DEPLOYMENT_MODE?:string; FARE_COMMIT_SHA?:string; }
 async function authorized(req:Request,body:string,env:Env){return authorizeRequest(req,body,env);}
 function json(data:unknown,status=200){return new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json"}});}
 
 const worker={
   async fetch(req:Request,env:Env):Promise<Response>{
     const u=new URL(req.url);
-    if(req.method==="GET"&&u.pathname==="/health")return json({ok:true,spec:"1.3"});
+    if(req.method==="GET"&&u.pathname==="/health")return json({ok:true,spec:"1.3",deployment_mode:normalizeDeploymentMode(env.FARE_DEPLOYMENT_MODE),commit_sha:env.FARE_COMMIT_SHA??null});
     if(req.method==="POST"&&u.pathname==="/audit/evidence"){
       const body=await req.text(); if(!await authorized(req,body,env))return json({error:"UNAUTHORIZED"},401);
       try{return json({ok:true,...await recordAuditEvidence(env.DB,JSON.parse(body))},202);}catch(e){const m=e instanceof Error?e.message:String(e);return json({error:m},m==='AUDIT_EVIDENCE_CONFLICT'?409:400);}
@@ -251,6 +251,6 @@ const worker={
     }
     return json({error:"NOT_FOUND"},404);
   }
-  ,async scheduled(event:any,env:Env):Promise<void>{ const now=new Date().toISOString(); await cleanupExpiredNonces(env.DB,now); if(event?.cron==="*/5 * * * *"){const agencyExpiry=await expireAgencyOffers(env.DB,now,1);if(agencyExpiry.expired)return;const liveExpiry=await expireLiveProviderOffers(env.DB,now,1);if(liveExpiry.processed||liveExpiry.resumed)return;await planDueCandidateSearches(env.DB,now,8,4);await dispatchProviderSearchPlans(env.DB,now,2);await evaluateDueProvisionals(env.DB,now,1);await evaluateDuePromotionBursts(env.DB,now,1);return;} await projectAlertIntents(env.DB,now,10); await projectDomainEvents(env.DB,now,"cron",2); await scheduleDueSources(env.DB,now,10); }
+  ,async scheduled(event:any,env:Env):Promise<void>{ const now=new Date().toISOString(); await cleanupExpiredNonces(env.DB,now); if(event?.cron==="*/5 * * * *"){const agencyExpiry=await expireAgencyOffers(env.DB,now,1);if(agencyExpiry.expired)return;const liveExpiry=await expireLiveProviderOffers(env.DB,now,1);if(liveExpiry.processed||liveExpiry.resumed)return;await planDueCandidateSearches(env.DB,now,8,4);await dispatchProviderSearchPlans(env.DB,now,2);await evaluateDueProvisionals(env.DB,now,1);await evaluateDuePromotionBursts(env.DB,now,1);return;} await projectAlertIntents(env.DB,now,10,normalizeDeploymentMode(env.FARE_DEPLOYMENT_MODE)); await projectDomainEvents(env.DB,now,"cron",2); await scheduleDueSources(env.DB,now,10); }
 };
 export default worker;
