@@ -58,6 +58,10 @@ def legacy_ingest_enabled():
     try: txt=(ROOT/'wrangler.jsonc').read_text()
     except Exception: return False
     return bool(re.search(r'"ALLOW_LEGACY_INGEST_TOKEN"\s*:\s*"?1"?',txt))
+def github_readback_ok(data,head):
+    expected=os.environ.get('FARE_GITHUB_REPOSITORY')
+    contexts=set(data.get('required_status_contexts') or []) if data else set()
+    return bool(data and data.get('provider')=='github' and data.get('visibility')=='public' and data.get('default_branch')=='main' and data.get('ci_conclusion')=='success' and data.get('branch_protection_verified') is True and 'test' in contexts and evidence_commit_ok(data,head) and evidence_recent(data,24) and (not expected or data.get('repository_full_name')==expected))
 def auth_ok(data): return bool(data and data.get('provider')=='cloudflare' and data.get('auth_verified') is True and evidence_recent(data,24))
 def d1_readback_ok(data,head): return bool(data and data.get('provider')=='cloudflare' and data.get('binding_verified') is True and data.get('database_id')==d1_id() and evidence_commit_ok(data,head) and evidence_recent(data,24))
 def deploy_ok(data,head): return bool(data and data.get('provider')=='cloudflare' and data.get('deployed') is True and data.get('version_id') and evidence_commit_ok(data,head) and evidence_recent(data,24))
@@ -74,6 +78,8 @@ def evaluate(remote=None):
     blockers=[]; head=git_head()
     if not code_ready(head):blockers.append('LOCAL_CODE_GATES_NOT_READY')
     if not github_remote_ok(remote if remote is not None else git_remote()):blockers.append('GITHUB_REMOTE_MISSING')
+    github=provider_evidence('github-readback') or {}
+    if not github_readback_ok(github,head):blockers.append('GITHUB_PROVIDER_READBACK_MISSING')
     if d1_id() in PLACEHOLDERS:blockers.append('D1_DATABASE_ID_MISSING')
     if legacy_ingest_enabled():blockers.append('LEGACY_INGEST_AUTH_ENABLED')
     auth=provider_evidence('cloudflare-auth') or {}; d1=provider_evidence('d1-readback') or {}; deploy=provider_evidence('worker-deploy') or {}; secrets=provider_evidence('production-secrets') or {}
