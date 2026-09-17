@@ -7,6 +7,9 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+CHECKOUT_SHA = "11d5960a326750d5838078e36cf38b85af677262"
+SETUP_NODE_SHA = "49933ea5288caeca8642d1e84afbd3f7d6820020"
+SETUP_PYTHON_SHA = "a26af69be951a213d495a4c3e4e4022e16d87065"
 
 
 def load_prepush():
@@ -25,6 +28,18 @@ def test_ci_contract_present_and_pins_wrangler_dry_run():
     cmd = pkg["scripts"]["check:wrangler"]
     assert "npm run build" in cmd
     assert "wrangler@4.131.2 deploy --dry-run --config wrangler.ci.jsonc" in cmd
+
+
+def test_ci_actions_are_immutable_and_minimum_permission():
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert f"actions/checkout@{CHECKOUT_SHA}" in ci
+    assert f"actions/setup-node@{SETUP_NODE_SHA}" in ci
+    assert f"actions/setup-python@{SETUP_PYTHON_SHA}" in ci
+    assert "actions/checkout@v4" not in ci
+    assert "actions/setup-node@v4" not in ci
+    assert "actions/setup-python@v5" not in ci
+    assert "permissions:\n  contents: read\n" in ci
+    assert "persist-credentials: false" in ci
 
 
 def test_ci_wrangler_uses_synthetic_d1_but_production_stays_fail_closed():
