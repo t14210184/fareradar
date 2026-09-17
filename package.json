@@ -17,7 +17,8 @@
     "access:review": "python3 scripts/access_review_runtime.py",
     "readback:github": "python3 scripts/github_provider.py readback",
     "bootstrap:github": "python3 scripts/github_provider.py bootstrap",
-    "readback:cloudflare": "python3 scripts/cloudflare_provider.py"
+    "readback:cloudflare": "python3 scripts/cloudflare_provider.py",
+    "probe:live": "python3 scripts/live_probe.py"
   },
   "devDependencies": {
     "typescript": "5.8.3"
