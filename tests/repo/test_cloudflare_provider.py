@@ -32,6 +32,9 @@ class Api:
             {"name":"FARE_DEPLOYMENT_MODE","type":"plain_text","text":MODE},
         ]
         self.versions = [{"version_id":"v1","percentage":100}]
+        self.crons = [{"cron":"* * * * *"}]
+        self.account_subdomain = "acct"
+        self.script_subdomain_enabled = True
         self.secrets = [{"name":"WORKER_TOKEN"},{"name":"INGEST_HMAC_SECRETS"}]
         self.missing_source_review = False
         self.missing_provider_review = False
@@ -39,6 +42,9 @@ class Api:
         if path == f"/d1/database/{DB}": return envelope({"uuid":DB,"name":"fare-radar-production"})
         if path == f"/workers/scripts/{WORKER}/settings": return envelope({"bindings":self.bindings})
         if path == f"/workers/scripts/{WORKER}/deployments": return envelope({"deployments":[{"id":"dep1","versions":self.versions}]})
+        if path == f"/workers/scripts/{WORKER}/schedules": return envelope({"schedules":self.crons})
+        if path == "/workers/subdomain": return envelope({"subdomain":self.account_subdomain})
+        if path == f"/workers/scripts/{WORKER}/subdomain": return envelope({"enabled":self.script_subdomain_enabled,"previews_enabled":False})
         if path == f"/workers/scripts/{WORKER}/secrets": return envelope(self.secrets)
         raise AssertionError(path)
     def post(self, path, payload):
@@ -67,6 +73,8 @@ def test_collects_one_same_source_snapshot():
     assert state["database_id"] == DB
     assert state["commit_sha"] == HEAD
     assert state["version_id"] == "v1"
+    assert state["worker_origin"] == "https://fare-radar.acct.workers.dev"
+    assert state["cron_schedules"] == ["* * * * *"]
     assert state["migrations_verified"] is True
     assert state["baseline_seeds_verified"] is True
     assert state["dispatchable_reviews_verified"] is True
@@ -78,6 +86,14 @@ def test_rejects_wrong_binding_and_split_deployment():
     with pytest.raises(mod.CloudflareProviderError, match="WORKER_D1_BINDING_MISMATCH"): collect(api)
     api = Api(); api.versions = [{"version_id":"v1","percentage":50},{"version_id":"v2","percentage":50}]
     with pytest.raises(mod.CloudflareProviderError, match="WORKER_ACTIVE_VERSION_NOT_SINGLE_100_PERCENT"): collect(api)
+
+def test_rejects_cron_or_origin_drift():
+    api = Api(); api.crons = [{"cron":"*/5 * * * *"}]
+    with pytest.raises(mod.CloudflareProviderError, match="WORKER_CRON_SET_MISMATCH"): collect(api)
+    api = Api(); api.script_subdomain_enabled = False
+    with pytest.raises(mod.CloudflareProviderError, match="WORKER_ORIGIN_UNAVAILABLE"): collect(api)
+    api = Api(); api.account_subdomain = ""
+    with pytest.raises(mod.CloudflareProviderError, match="WORKER_ORIGIN_UNAVAILABLE"): collect(api)
 
 def test_rejects_migration_seed_and_review_drift():
     api = Api(); api.migrations = api.migrations[:-1]
