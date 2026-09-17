@@ -36,16 +36,32 @@ Provision `INGEST_HMAC_SECRETS` as a JSON object mapping each D1 `secret_slot` t
 
 ## Production release automation
 
-Production release remains fail-closed. Local green tests never imply Production readiness. The repository currently exposes only read-only release planning commands:
+Production release remains fail-closed. Local green tests never imply Production readiness. Read-only planning remains available through:
 
 ```bash
 npm run preflight
 npm run deploy:plan
+npm run readback:github
+npm run readback:cloudflare
 ```
 
-`deploy:plan` never mutates GitHub or Cloudflare. It prints the exact external blockers and ordered shared-mutation steps. GitHub remote creation, Cloudflare authentication, D1 creation/binding, secret provisioning, Worker deployment and provider readback require an authorized provider connector or equivalent mutation channel plus same-source readback; there is intentionally no deployment mutation command in `package.json`.
+Shared mutations are bounded separately. `npm run deploy:shadow` is Shadow-only and cannot activate Production. Production activation remains unavailable until exact-head Shadow acceptance, provider readback, required GitHub protection, and explicit exact-head human approval are all satisfied.
 
-After deployment exists, Shadow acceptance remains separate. Production readiness is only allowed after the 14-day labeled Shadow corpus passes the v1.3 acceptance evaluator and `npm run preflight` returns no blockers.
+## GitHub and Cloudflare provider readback
+
+GitHub evidence is valid only for the exact public repository, default `main`, exact commit, successful exact-head CI, and branch protection requiring the `test` status. A remote URL alone is never a provider PASS.
+
+Cloudflare readback is one same-source session across account identity, D1, Worker settings, active deployment, secrets, schedules, migrations, baseline seeds, and dispatchable source/provider human-review evidence. The Worker must expose exactly one `* * * * *` cron, one active version at 100%, the exact `FARE_COMMIT_SHA` and deployment mode, the exact D1 binding, no legacy ingest secret/flag, and an enabled workers.dev origin. Evidence from different readback sessions cannot be spliced into a Production PASS.
+
+## Live credential probes
+
+`npm run probe:live` verifies the deployed runtime identity before checking credentials. The Worker token probe uses a synthetic nonexistent verification lease: a valid token must pass authentication and stop at `LIVE_SOURCE_LEASE_REQUIRED`, so no business mutation occurs. Shadow and Access reviewer probes use their existing signed readback routes; they consume replay-protection nonces but do not create or modify review records. All three supplied credential values must be proven active against the exact deployed commit.
+
+## Bounded Shadow deployment
+
+`npm run deploy:shadow` requires a clean worktree, exact `FARE_SHADOW_EXPECTED_HEAD`, current exact-head local Gate evidence, a non-placeholder D1 binding, and all required Cloudflare/reviewer credentials. It runs `npm run build` before any provider access, reads the existing Worker prestate, and dispatches exactly one pinned `wrangler@4.131.2 deploy` with `--keep-vars --strict`, `FARE_COMMIT_SHA=<HEAD>`, and hard-coded `FARE_DEPLOYMENT_MODE=SHADOW_ACCEPTANCE`.
+
+A failed or timed-out Wrangler process is never blindly resent. The driver performs strict Cloudflare same-source readback. Exact expected state is accepted as confirmed; provider state identical to the prestate is classified `SHADOW_DEPLOY_NOT_APPLIED`; any changed but non-matching state is `SHADOW_DEPLOY_PARTIAL_OR_AMBIGUOUS` and stops. A confirmed deployment must then pass all live credential probes before evidence is written.
 
 ## Live provider offer expiry lifecycle
 
