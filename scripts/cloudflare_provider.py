@@ -14,6 +14,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 EVIDENCE_DIR = ROOT / "evidence" / "provider"
 REQUIRED_SECRETS = {"WORKER_TOKEN", "INGEST_HMAC_SECRETS"}
 ALLOWED_MODES = {"SHADOW_ACCEPTANCE", "PRODUCTION"}
+EXPECTED_CRONS = ["* * * * *"]
 
 class CloudflareProviderError(RuntimeError):
     pass
@@ -143,6 +144,19 @@ def collect_readback(api: Any, *, account_id: str, database_id: str, worker_name
     deployment_id, versions = _deployment_versions(deployments)
     version_id = str(versions[0]["version_id"])
 
+    schedules = _result(api.get(f"/workers/scripts/{worker_name}/schedules"), "WORKER_SCHEDULE_READBACK_FAILED")
+    schedule_rows = schedules.get("schedules") if isinstance(schedules, dict) else schedules
+    crons = sorted(str(x.get("cron")) for x in (schedule_rows or []) if isinstance(x, dict) and x.get("cron"))
+    if crons != EXPECTED_CRONS:
+        raise CloudflareProviderError("WORKER_CRON_SET_MISMATCH")
+
+    account_subdomain = _result(api.get("/workers/subdomain"), "WORKERS_SUBDOMAIN_READBACK_FAILED")
+    script_subdomain = _result(api.get(f"/workers/scripts/{worker_name}/subdomain"), "WORKER_SUBDOMAIN_READBACK_FAILED")
+    subdomain = str(account_subdomain.get("subdomain") or "") if isinstance(account_subdomain, dict) else ""
+    if not subdomain or not isinstance(script_subdomain, dict) or script_subdomain.get("enabled") is not True:
+        raise CloudflareProviderError("WORKER_ORIGIN_UNAVAILABLE")
+    worker_origin = f"https://{worker_name}.{subdomain}.workers.dev"
+
     secrets_result = _result(api.get(f"/workers/scripts/{worker_name}/secrets"), "WORKER_SECRETS_READBACK_FAILED")
     secrets_list = secrets_result if isinstance(secrets_result, list) else (secrets_result or {}).get("secrets", []) if isinstance(secrets_result, dict) else []
     secret_names = {str(x.get("name")) for x in secrets_list if isinstance(x, dict) and x.get("name")}
@@ -198,6 +212,8 @@ def collect_readback(api: Any, *, account_id: str, database_id: str, worker_name
         "database_id": database_id,
         "database_name": "fare-radar-production",
         "worker_name": worker_name,
+        "worker_origin": worker_origin,
+        "cron_schedules": crons,
         "commit_sha": expected_head,
         "deployment_mode": expected_mode,
         "deployment_id": deployment_id,
@@ -217,7 +233,7 @@ def write_evidence(state: dict[str, Any]) -> None:
     payloads = {
         "cloudflare-auth.json": {**common, "auth_verified": True, "account_id": state["account_id"]},
         "d1-readback.json": {**common, "binding_verified": True, "database_id": state["database_id"], "commit_sha": state["commit_sha"], "migrations_verified": True, "baseline_seeds_verified": True, "dispatchable_reviews_verified": True},
-        "worker-deploy.json": {**common, "deployed": True, "version_id": state["version_id"], "deployment_id": state["deployment_id"], "commit_sha": state["commit_sha"], "deployment_mode": state["deployment_mode"]},
+        "worker-deploy.json": {**common, "deployed": True, "version_id": state["version_id"], "deployment_id": state["deployment_id"], "commit_sha": state["commit_sha"], "deployment_mode": state["deployment_mode"], "worker_origin": state["worker_origin"], "cron_schedules": state["cron_schedules"]},
         "production-secrets.json": {**common, "required_secrets_verified": True, "secret_names": state["secret_names"], "legacy_ingest_auth_enabled": False, "commit_sha": state["commit_sha"]},
         "cloudflare-readback.json": state,
     }
