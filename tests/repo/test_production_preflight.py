@@ -9,6 +9,7 @@ def test_only_github_remote_is_accepted():
 def test_local_env_cannot_fake_provider_readback(monkeypatch):
     monkeypatch.setenv('CLOUDFLARE_API_TOKEN','x'*40); monkeypatch.setenv('CLOUDFLARE_ACCOUNT_ID','y'*32)
     got=pf.evaluate(remote='https://github.com/acme/fare-radar.git')
+    assert 'GITHUB_PROVIDER_READBACK_MISSING' in got['blockers']
     assert 'CLOUDFLARE_AUTH_READBACK_MISSING' in got['blockers']
     assert 'PRODUCTION_SECRETS_READBACK_MISSING' in got['blockers']
 def test_placeholder_d1_blocks(): assert pf.d1_id() in pf.PLACEHOLDERS
@@ -25,8 +26,17 @@ def test_legacy_ingest_auth_is_production_blocker(monkeypatch):
     monkeypatch.setenv('ALLOW_LEGACY_INGEST_TOKEN','1')
     got=pf.evaluate(remote='https://github.com/acme/fare-radar.git')
     assert 'LEGACY_INGEST_AUTH_ENABLED' in got['blockers']
+def test_github_provider_evidence_requires_exact_head_ci_and_protection(monkeypatch):
+    head='a'*40
+    monkeypatch.setattr(pf,'evidence_recent',lambda data,max_hours=24,now=None: True)
+    good={'provider':'github','repository_full_name':'acme/fare-radar','visibility':'public','default_branch':'main','commit_sha':head,'ci_conclusion':'success','branch_protection_verified':True,'required_status_contexts':['test']}
+    monkeypatch.setenv('FARE_GITHUB_REPOSITORY','acme/fare-radar')
+    assert pf.github_readback_ok(good,head)
+    bad=dict(good,commit_sha='b'*40); assert not pf.github_readback_ok(bad,head)
+    bad=dict(good,required_status_contexts=['lint']); assert not pf.github_readback_ok(bad,head)
+    bad=dict(good,repository_full_name='other/fare-radar'); assert not pf.github_readback_ok(bad,head)
 def test_provider_evidence_requires_exact_head_freshness_and_secret_manifest(monkeypatch):
-    head='a'*40; now=dt.datetime(2026,9,15,4,0,tzinfo=dt.timezone.utc); observed='2026-09-15T03:30:00Z'
+    head='a'*40; observed='2026-09-15T03:30:00Z'
     monkeypatch.setattr(pf,'d1_id',lambda:'db-real')
     d1={'provider':'cloudflare','binding_verified':True,'database_id':'db-real','commit_sha':head,'observed_at':observed}
     dep={'provider':'cloudflare','deployed':True,'version_id':'v1','commit_sha':head,'observed_at':observed}
