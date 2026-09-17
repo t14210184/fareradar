@@ -45,6 +45,8 @@ def test_provider_evidence_requires_exact_head_freshness_and_secret_manifest(mon
     monkeypatch.setattr(pf,'evidence_recent',lambda data,max_hours=24,now=None: True)
     assert pf.cloudflare_session_ok(auth,d1,dep,sec)
     assert pf.d1_readback_ok(d1,head) and pf.deploy_ok(dep,head) and pf.secrets_ok(sec,head) and pf.auth_ok(auth)
+    assert pf.production_deploy_ok(dep,head) is False
+    dep['deployment_mode']='PRODUCTION'; assert pf.production_deploy_ok(dep,head) is True
     d1['commit_sha']='b'*40; assert not pf.d1_readback_ok(d1,head)
     d1['commit_sha']=head; d1['migrations_verified']=False; assert not pf.d1_readback_ok(d1,head)
     sec['secret_names']=['INGEST_HMAC_SECRETS']; assert not pf.secrets_ok(sec,head)
