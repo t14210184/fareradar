@@ -39,6 +39,7 @@ def common(monkeypatch):
     monkeypatch.setattr(mod, "require_clean_exact_head", lambda expected: HEAD)
     monkeypatch.setattr(mod.preflight, "code_ready", lambda head: True)
     monkeypatch.setattr(mod, "d1_id", lambda: DB)
+    monkeypatch.setattr(mod.cf, "write_evidence", lambda state: None)
 
 
 def state():
