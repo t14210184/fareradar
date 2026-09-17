@@ -68,6 +68,7 @@ def cloudflare_session_ok(*items):
 def auth_ok(data): return bool(data and data.get('provider')=='cloudflare' and data.get('auth_verified') is True and evidence_recent(data,24))
 def d1_readback_ok(data,head): return bool(data and data.get('provider')=='cloudflare' and data.get('binding_verified') is True and data.get('migrations_verified') is True and data.get('baseline_seeds_verified') is True and data.get('dispatchable_reviews_verified') is True and data.get('database_id')==d1_id() and evidence_commit_ok(data,head) and evidence_recent(data,24))
 def deploy_ok(data,head): return bool(data and data.get('provider')=='cloudflare' and data.get('deployed') is True and data.get('version_id') and data.get('deployment_mode') in {'SHADOW_ACCEPTANCE','PRODUCTION'} and evidence_commit_ok(data,head) and evidence_recent(data,24))
+def production_deploy_ok(data,head): return bool(deploy_ok(data,head) and data.get('deployment_mode')=='PRODUCTION')
 def secrets_ok(data,head):
     names=set(data.get('secret_names') or []) if data else set()
     return bool(data and data.get('provider')=='cloudflare' and data.get('required_secrets_verified') is True and REQUIRED_WORKER_SECRETS<=names and data.get('legacy_ingest_auth_enabled') is False and evidence_commit_ok(data,head) and evidence_recent(data,24))
@@ -92,5 +93,6 @@ def evaluate(remote=None):
     if not deploy_ok(deploy,head):blockers.append('WORKER_DEPLOY_READBACK_MISSING')
     if not secrets_ok(secrets,head):blockers.append('PRODUCTION_SECRETS_READBACK_MISSING')
     if not shadow_ok(head):blockers.append('SHADOW_ACCEPTANCE_MISSING')
+    if deploy_ok(deploy,head) and not production_deploy_ok(deploy,head):blockers.append('PRODUCTION_ACTIVATION_REQUIRED')
     return {'code_ready':code_ready(head),'production_ready':not blockers,'commit_sha':head,'blockers':blockers}
 if __name__=='__main__': print(json.dumps(evaluate(),ensure_ascii=False,indent=2))
