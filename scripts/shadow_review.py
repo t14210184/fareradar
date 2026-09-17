@@ -15,7 +15,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable
+from typing import Any, Iterable
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 REQUIRED_FIELDS = {
@@ -23,6 +23,12 @@ REQUIRED_FIELDS = {
     "source_discovery", "agency_clearance", "false_actionable", "safety_error_code", "evidence_id",
 }
 SUBJECT_TYPES = {"ITINERARY", "PROMOTION", "AGENCY_OFFER", "SOURCE_EVENT", "EMAIL", "ROUTE"}
+CANONICAL_ACCEPTANCE_FIELDS = {
+    "pass", "commit_sha", "deployment_mode", "shadow_days", "labeled_candidates",
+    "labeled_complex_candidates", "labeled_source_discovery_events", "labeled_agency_clearance_events",
+    "complex_strategy_coverage", "complex_strategy_missing", "false_actionable_complex",
+    "safety_critical_errors", "total_reviews",
+}
 
 
 class ShadowReviewError(RuntimeError):
@@ -31,6 +37,16 @@ class ShadowReviewError(RuntimeError):
 
 class TransportUnknown(ShadowReviewError):
     pass
+
+
+def evidence_root() -> pathlib.Path:
+    raw = os.environ.get("FARE_EVIDENCE_ROOT", "")
+    if not raw:
+        return ROOT / "evidence"
+    path = pathlib.Path(raw).expanduser()
+    if not path.is_absolute():
+        raise ShadowReviewError("FARE_EVIDENCE_ROOT_MUST_BE_ABSOLUTE")
+    return path
 
 
 def git(*args: str) -> str:
@@ -132,9 +148,9 @@ class SignedHttpTransport:
                 "x-fare-nonce": nonce,
                 "x-fare-signature": signature,
             })
-        req = urllib.request.Request(url, data=body.encode() if body else None, headers=headers, method=method.upper())
+        request = urllib.request.Request(url, data=body.encode() if body else None, headers=headers, method=method.upper())
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read().decode("utf-8")
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as exc:
@@ -196,12 +212,47 @@ def submit_reviews(
             raise ShadowReviewError(f"SHADOW_REVIEW_POSTREADBACK_MISMATCH:{review['sample_id']}")
         written += 1
     acceptance = transport.request("POST", "/shadow/acceptance/readback", {}, signed=True)
-    return {"dry_run": False, "validated": len(items), "written": written, "already_confirmed": confirmed, "commit_sha": commit, "acceptance": acceptance}
+    return {
+        "dry_run": False,
+        "validated": len(items),
+        "written": written,
+        "already_confirmed": confirmed,
+        "commit_sha": commit,
+        "acceptance": acceptance,
+    }
+
+
+def validate_acceptance(acceptance: Any, commit: str) -> dict[str, Any]:
+    if not isinstance(acceptance, dict) or not CANONICAL_ACCEPTANCE_FIELDS <= set(acceptance):
+        raise ShadowReviewError("SHADOW_ACCEPTANCE_SCHEMA_INVALID")
+    if type(acceptance.get("pass")) is not bool:
+        raise ShadowReviewError("SHADOW_ACCEPTANCE_SCHEMA_INVALID")
+    if acceptance.get("commit_sha") != commit or acceptance.get("deployment_mode") != "SHADOW_ACCEPTANCE":
+        raise ShadowReviewError("SHADOW_ACCEPTANCE_IDENTITY_MISMATCH")
+    for field in (
+        "shadow_days", "labeled_candidates", "labeled_complex_candidates",
+        "labeled_source_discovery_events", "labeled_agency_clearance_events",
+        "false_actionable_complex", "safety_critical_errors", "total_reviews",
+    ):
+        value = acceptance.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ShadowReviewError("SHADOW_ACCEPTANCE_SCHEMA_INVALID")
+    if not isinstance(acceptance.get("complex_strategy_coverage"), list) or not isinstance(acceptance.get("complex_strategy_missing"), list):
+        raise ShadowReviewError("SHADOW_ACCEPTANCE_SCHEMA_INVALID")
+    return acceptance
+
+
+def write_acceptance_evidence(acceptance: Any, commit: str) -> pathlib.Path:
+    canonical = validate_acceptance(acceptance, commit)
+    path = evidence_root() / "shadow-acceptance.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(canonical, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
 
 
 def resolve_base_url(explicit: str | None) -> str:
     # Provider evidence is authoritative when available. The fallback is intentionally explicit.
-    evidence = ROOT / "evidence" / "provider" / "cloudflare-worker.json"
+    evidence = evidence_root() / "provider" / "worker-deploy.json"
     provider_url: str | None = None
     provider_head: str | None = None
     if evidence.exists():
@@ -234,7 +285,15 @@ def main(argv: list[str] | None = None) -> int:
         raise ShadowReviewError("SHADOW_REVIEW_CREDENTIALS_REQUIRED")
     commit = local_head()
     base_url = resolve_base_url(os.environ.get("FARE_RADAR_BASE_URL"))
-    result = submit_reviews(reviews, transport=SignedHttpTransport(base_url, key_id, secret), key_id=key_id, commit=commit, dry_run=args.dry_run)
+    result = submit_reviews(
+        reviews,
+        transport=SignedHttpTransport(base_url, key_id, secret),
+        key_id=key_id,
+        commit=commit,
+        dry_run=args.dry_run,
+    )
+    if not args.dry_run:
+        write_acceptance_evidence(result.get("acceptance"), commit)
     print(json.dumps(result, sort_keys=True))
     return 0
 

@@ -11,6 +11,7 @@ import subprocess
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PLACEHOLDERS = {"", "REPLACE_WITH_D1_DATABASE_ID", "TODO", "TBD"}
 REQUIRED_WORKER_SECRETS = {"WORKER_TOKEN", "INGEST_HMAC_SECRETS"}
+EXPECTED_COMPLEX_STRATEGIES = {"S09", "S11", "S12", "S14", "S15"}
 
 
 def evidence_root() -> pathlib.Path:
@@ -227,13 +228,21 @@ def secrets_ok(data, head):
 def shadow_ok(head=None):
     data = load_json(evidence_root() / "shadow-acceptance.json") or {}
     head = head or git_head()
-    return (
+    coverage = set(data.get("complex_strategy_coverage") or [])
+    missing = data.get("complex_strategy_missing")
+    return bool(
         data.get("pass") is True
         and data.get("commit_sha") == head
-        and data.get("days", 0) >= 14
-        and data.get("labeled", 0) >= 150
-        and data.get("complex", 0) >= 30
-        and data.get("safety_errors", 1) == 0
+        and data.get("deployment_mode") == "SHADOW_ACCEPTANCE"
+        and data.get("shadow_days", 0) >= 14
+        and data.get("labeled_candidates", 0) >= 150
+        and data.get("labeled_complex_candidates", 0) >= 30
+        and data.get("labeled_source_discovery_events", 0) >= 30
+        and data.get("labeled_agency_clearance_events", 0) >= 10
+        and EXPECTED_COMPLEX_STRATEGIES <= coverage
+        and missing == []
+        and data.get("false_actionable_complex", 1) == 0
+        and data.get("safety_critical_errors", 1) == 0
     )
 
 
