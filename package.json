@@ -14,7 +14,9 @@
     "deploy:plan": "python3 scripts/deploy_plan.py",
     "check:wrangler": "npm run build && npx --yes wrangler@4.131.2 deploy --dry-run --config wrangler.ci.jsonc",
     "shadow:review": "python3 scripts/shadow_review.py",
-    "access:review": "python3 scripts/access_review_runtime.py"
+    "access:review": "python3 scripts/access_review_runtime.py",
+    "readback:github": "python3 scripts/github_provider.py readback",
+    "bootstrap:github": "python3 scripts/github_provider.py bootstrap"
   },
   "devDependencies": {
     "typescript": "5.8.3"
