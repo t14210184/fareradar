@@ -42,7 +42,26 @@ def common(monkeypatch):
 
 
 def state():
-    return {"worker_origin":"https://fare-radar.acct.workers.dev","version_id":"v-new","commit_sha":HEAD,"deployment_mode":"SHADOW_ACCEPTANCE"}
+    return {
+        "readback_session_id":"session-1",
+        "observed_at":"2026-09-17T15:00:00Z",
+        "provider":"cloudflare",
+        "account_id":"acct",
+        "database_id":DB,
+        "worker_name":"fare-radar",
+        "worker_origin":"https://fare-radar.acct.workers.dev",
+        "cron_schedules":["* * * * *"],
+        "deployment_id":"dep-new",
+        "version_id":"v-new",
+        "commit_sha":HEAD,
+        "deployment_mode":"SHADOW_ACCEPTANCE",
+        "binding_verified":True,
+        "migrations_verified":True,
+        "baseline_seeds_verified":True,
+        "dispatchable_reviews_verified":True,
+        "secret_names":["WORKER_TOKEN","INGEST_HMAC_SECRETS"],
+        "legacy_ingest_auth_enabled":False,
+    }
 
 
 def test_build_precedes_one_shadow_only_deploy(monkeypatch):
