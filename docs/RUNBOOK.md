@@ -34,7 +34,6 @@ The worker is optional and never owns canonical state. Configure `FARE_RADAR_WOR
 
 Provision `INGEST_HMAC_SECRETS` as a JSON object mapping each D1 `secret_slot` to its secret. Sender credentials are scoped by `ingest_auth_keys` to source and, for agencies, agency ID. Never put this JSON into Git or D1.
 
-
 ## Production release automation
 
 Production release remains fail-closed. Local green tests never imply Production readiness. The repository currently exposes only read-only release planning commands:
@@ -74,3 +73,9 @@ The capacity fixtures require the normal five-minute path to stay at or below th
 Human-authored Shadow labels stay outside the public repository. Validate or submit an exact JSONL file with `npm run shadow:review -- --input /private/shadow-reviews.jsonl [--dry-run]` and private `FARE_HMAC_KEY_ID` / `FARE_HMAC_SECRET` credentials. The client requires a clean exact HEAD and verifies `/health` is `spec=1.3`, `SHADOW_ACCEPTANCE`, and the same commit before any review operation. Duplicate `sample_id` values and duplicate canonical review units are rejected locally.
 
 Every review mutation is readback-first through `/shadow/reviews/readback`. An already-present exact row is confirmed and never resent; an absent row permits one bounded write; a mismatched row fails closed. After a successful write the exact row is read back again. A transport timeout is reconciled immediately with the same readback endpoint: exact state is accepted as confirmed, absent state is reported as unknown/not-applied without an in-process resend, and mismatched state is ambiguous and blocks progress. Rerun only the identical JSONL so the next attempt begins with the same pre-readback fence. The client finishes by reading `/shadow/acceptance/readback`; it never synthesizes labels or safety judgments to satisfy thresholds.
+
+## Human access review transport
+
+Source/provider access decisions remain human-authored evidence and the JSONL stays outside the repository. Run `npm run access:review -- --input /private/access-reviews.jsonl --dry-run` before submitting the identical file without `--dry-run`. The launcher requires a clean exact HEAD, an exact-head Worker origin, and `/health` reporting spec `1.3`, deployment mode `SHADOW_ACCEPTANCE` or `PRODUCTION`, and the exact local commit. It accepts the current `deployment_mode` health field and the historical `mode` alias only for compatibility.
+
+Before every audit-evidence or access-review mutation, the client performs same-source readback. Exact immutable state is not resent; absent state permits one bounded mutation; mismatched state fails closed. A lost mutation response is reconciled by readback before any retry. Provider access bases remain limited to `OFFICIAL_API`, `PARTNER_CONTRACT`, `AIRLINE_DIRECT`, `MANUAL_ORACLE`, or `PUBLIC_PAGE_MONITOR`; automation never invents or approves access, terms, privacy, or enablement decisions.
