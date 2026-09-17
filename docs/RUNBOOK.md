@@ -45,7 +45,7 @@ npm run readback:github
 npm run readback:cloudflare
 ```
 
-Shared mutations are bounded separately. `npm run deploy:shadow` is Shadow-only and cannot activate Production. Production activation remains unavailable until exact-head Shadow acceptance, provider readback, required GitHub protection, and explicit exact-head human approval are all satisfied.
+Shared mutations are bounded separately. `npm run deploy:shadow` is Shadow-only and cannot activate Production. `npm run deploy:production` remains blocked until the exact-head Shadow acceptance and all provider/GitHub gates are satisfied and a human has supplied the exact approved commit in `FARE_PRODUCTION_HUMAN_APPROVED_HEAD`.
 
 ## GitHub and Cloudflare provider readback
 
@@ -62,6 +62,14 @@ Cloudflare readback is one same-source session across account identity, D1, Work
 `npm run deploy:shadow` requires a clean worktree, exact `FARE_SHADOW_EXPECTED_HEAD`, current exact-head local Gate evidence, a non-placeholder D1 binding, and all required Cloudflare/reviewer credentials. It runs `npm run build` before any provider access, reads the existing Worker prestate, and dispatches exactly one pinned `wrangler@4.131.2 deploy` with `--keep-vars --strict`, `FARE_COMMIT_SHA=<HEAD>`, and hard-coded `FARE_DEPLOYMENT_MODE=SHADOW_ACCEPTANCE`.
 
 A failed or timed-out Wrangler process is never blindly resent. The driver performs strict Cloudflare same-source readback. Exact expected state is accepted as confirmed; provider state identical to the prestate is classified `SHADOW_DEPLOY_NOT_APPLIED`; any changed but non-matching state is `SHADOW_DEPLOY_PARTIAL_OR_AMBIGUOUS` and stops. A confirmed deployment must then pass all live credential probes before evidence is written.
+
+## Human-gated Production activation
+
+`npm run deploy:production` cannot create its own approval. `FARE_PRODUCTION_HUMAN_APPROVED_HEAD` must already exist, must be a 40-hex commit, and must equal the clean local HEAD. `npm run preflight` must report exactly one blocker: `PRODUCTION_ACTIVATION_REQUIRED`. This means local Gate evidence, GitHub exact-head CI/protection, Cloudflare same-session readback, secrets, D1/migrations/seeds/reviewer evidence, and exact-head 14-day Shadow acceptance are already satisfied.
+
+Immediately before the Production mutation, the driver reads the live Worker prestate and requires the same commit still deployed in `SHADOW_ACCEPTANCE`. It then performs exactly one pinned Wrangler deploy with `--keep-vars --strict` and hard-coded `FARE_DEPLOYMENT_MODE=PRODUCTION`. A lost/failed deploy response is handled exactly like Shadow: strict same-source readback first, no blind resend; unchanged provider state means `PRODUCTION_DEPLOY_NOT_APPLIED`, and any changed non-matching state means `PRODUCTION_DEPLOY_PARTIAL_OR_AMBIGUOUS`. Exact Production state must pass live credential probes before provider evidence is replaced.
+
+`production_ready=true` is impossible while the exact deployed Worker remains in Shadow mode; preflight keeps `PRODUCTION_ACTIVATION_REQUIRED` until the exact-head Production readback exists.
 
 ## Live provider offer expiry lifecycle
 
