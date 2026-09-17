@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import sys
 import pytest
@@ -18,8 +19,10 @@ HEAD = "b" * 40
 WORKER = "fare-radar"
 MODE = "SHADOW_ACCEPTANCE"
 
+
 def envelope(result):
     return mod.Response(200, {"success": True, "errors": [], "messages": [], "result": result})
+
 
 class Api:
     def __init__(self):
@@ -27,45 +30,51 @@ class Api:
         self.sources = sorted(mod._seed_ids(ROOT / "config" / "sources.seed.json", "source_id"))
         self.providers = sorted(mod._seed_ids(ROOT / "config" / "providers.seed.json", "provider_id"))
         self.bindings = [
-            {"name":"DB","type":"d1","id":DB},
-            {"name":"FARE_COMMIT_SHA","type":"plain_text","text":HEAD},
-            {"name":"FARE_DEPLOYMENT_MODE","type":"plain_text","text":MODE},
+            {"name": "DB", "type": "d1", "id": DB},
+            {"name": "FARE_COMMIT_SHA", "type": "plain_text", "text": HEAD},
+            {"name": "FARE_DEPLOYMENT_MODE", "type": "plain_text", "text": MODE},
         ]
-        self.versions = [{"version_id":"v1","percentage":100}]
-        self.crons = [{"cron":"* * * * *"}]
+        self.versions = [{"version_id": "v1", "percentage": 100}]
+        self.crons = [{"cron": "* * * * *"}]
         self.account_subdomain = "acct"
         self.script_subdomain_enabled = True
-        self.secrets = [{"name":"WORKER_TOKEN"},{"name":"INGEST_HMAC_SECRETS"}]
+        self.secrets = [{"name": "WORKER_TOKEN"}, {"name": "INGEST_HMAC_SECRETS"}]
         self.missing_source_review = False
         self.missing_provider_review = False
     def get(self, path):
-        if path == f"/d1/database/{DB}": return envelope({"uuid":DB,"name":"fare-radar-production"})
-        if path == f"/workers/scripts/{WORKER}/settings": return envelope({"bindings":self.bindings})
-        if path == f"/workers/scripts/{WORKER}/deployments": return envelope({"deployments":[{"id":"dep1","versions":self.versions}]})
-        if path == f"/workers/scripts/{WORKER}/schedules": return envelope({"schedules":self.crons})
-        if path == "/workers/subdomain": return envelope({"subdomain":self.account_subdomain})
-        if path == f"/workers/scripts/{WORKER}/subdomain": return envelope({"enabled":self.script_subdomain_enabled,"previews_enabled":False})
+        if path == f"/d1/database/{DB}": return envelope({"uuid": DB, "name": "fare-radar-production"})
+        if path == f"/workers/scripts/{WORKER}/settings": return envelope({"bindings": self.bindings})
+        if path == f"/workers/scripts/{WORKER}/deployments": return envelope({"deployments": [{"id": "dep1", "versions": self.versions}]})
+        if path == f"/workers/scripts/{WORKER}/schedules": return envelope({"schedules": self.crons})
+        if path == "/workers/subdomain": return envelope({"subdomain": self.account_subdomain})
+        if path == f"/workers/scripts/{WORKER}/subdomain": return envelope({"enabled": self.script_subdomain_enabled, "previews_enabled": False})
         if path == f"/workers/scripts/{WORKER}/secrets": return envelope(self.secrets)
         raise AssertionError(path)
     def post(self, path, payload):
         assert path == f"/d1/database/{DB}/query"
         sql = payload["sql"]
         if "FROM d1_migrations" in sql:
-            rows = [{"name":x} for x in self.migrations]
+            rows = [{"name": item} for item in self.migrations]
         elif "SELECT source_id FROM source_registry" in sql:
-            rows = [{"source_id":x} for x in self.sources]
+            rows = [{"source_id": item} for item in self.sources]
         elif "SELECT provider_id FROM provider_access_registry" in sql:
-            rows = [{"provider_id":x} for x in self.providers]
+            rows = [{"provider_id": item} for item in self.providers]
         elif "SELECT s.source_id FROM source_registry s" in sql:
-            rows = [{"source_id":"bad-source"}] if self.missing_source_review else []
+            rows = [{"source_id": "bad-source"}] if self.missing_source_review else []
         elif "SELECT p.provider_id FROM provider_access_registry p" in sql:
-            rows = [{"provider_id":"bad-provider"}] if self.missing_provider_review else []
+            rows = [{"provider_id": "bad-provider"}] if self.missing_provider_review else []
         else:
             raise AssertionError(sql)
-        return envelope([{"success":True,"results":rows}])
+        return envelope([{"success": True, "results": rows}])
+
 
 def collect(api):
     return mod.collect_readback(api, account_id=ACCOUNT, database_id=DB, worker_name=WORKER, expected_head=HEAD, expected_mode=MODE)
+
+
+def bootstrap(api):
+    return mod.collect_bootstrap_readback(api, account_id=ACCOUNT, database_id=DB, worker_name=WORKER, expected_head=HEAD, expected_mode=MODE)
+
 
 def test_collects_one_same_source_snapshot():
     state = collect(Api())
@@ -81,36 +90,63 @@ def test_collects_one_same_source_snapshot():
     assert set(state["secret_names"]) >= mod.REQUIRED_SECRETS
     assert state["readback_session_id"]
 
+
+def test_bootstrap_readback_deliberately_skips_human_review_gate():
+    api = Api(); api.missing_provider_review = True
+    state = bootstrap(api)
+    assert state["dispatchable_reviews_verified"] is False
+    with pytest.raises(mod.CloudflareProviderError, match="DISPATCHABLE_PROVIDER_REVIEW_MISSING"):
+        collect(api)
+
+
+def test_bootstrap_evidence_cannot_masquerade_as_full_provider_pass(monkeypatch, tmp_path):
+    monkeypatch.setenv("FARE_EVIDENCE_ROOT", str(tmp_path))
+    state = bootstrap(Api())
+    mod.write_bootstrap_evidence(state)
+    provider = tmp_path / "provider"
+    worker = json.loads((provider / "worker-deploy.json").read_text())
+    assert worker["bootstrap_only"] is True
+    assert (provider / "cloudflare-shadow-bootstrap.json").exists()
+    assert not (provider / "cloudflare-auth.json").exists()
+    assert not (provider / "d1-readback.json").exists()
+    assert not (provider / "production-secrets.json").exists()
+    with pytest.raises(mod.CloudflareProviderError, match="FULL_READBACK_REVIEWS_NOT_VERIFIED"):
+        mod.write_evidence(state)
+
+
 def test_rejects_wrong_binding_and_split_deployment():
     api = Api(); api.bindings[0]["id"] = "wrong"
-    with pytest.raises(mod.CloudflareProviderError, match="WORKER_D1_BINDING_MISMATCH"): collect(api)
-    api = Api(); api.versions = [{"version_id":"v1","percentage":50},{"version_id":"v2","percentage":50}]
-    with pytest.raises(mod.CloudflareProviderError, match="WORKER_ACTIVE_VERSION_NOT_SINGLE_100_PERCENT"): collect(api)
+    with pytest.raises(mod.CloudflareProviderError, match="WORKER_D1_BINDING_MISMATCH"): bootstrap(api)
+    api = Api(); api.versions = [{"version_id": "v1", "percentage": 50}, {"version_id": "v2", "percentage": 50}]
+    with pytest.raises(mod.CloudflareProviderError, match="WORKER_ACTIVE_VERSION_NOT_SINGLE_100_PERCENT"): bootstrap(api)
+
 
 def test_rejects_cron_or_origin_drift():
-    api = Api(); api.crons = [{"cron":"*/5 * * * *"}]
-    with pytest.raises(mod.CloudflareProviderError, match="WORKER_CRON_SET_MISMATCH"): collect(api)
+    api = Api(); api.crons = [{"cron": "*/5 * * * *"}]
+    with pytest.raises(mod.CloudflareProviderError, match="WORKER_CRON_SET_MISMATCH"): bootstrap(api)
     api = Api(); api.script_subdomain_enabled = False
-    with pytest.raises(mod.CloudflareProviderError, match="WORKER_ORIGIN_UNAVAILABLE"): collect(api)
+    with pytest.raises(mod.CloudflareProviderError, match="WORKER_ORIGIN_UNAVAILABLE"): bootstrap(api)
     api = Api(); api.account_subdomain = ""
-    with pytest.raises(mod.CloudflareProviderError, match="WORKER_ORIGIN_UNAVAILABLE"): collect(api)
+    with pytest.raises(mod.CloudflareProviderError, match="WORKER_ORIGIN_UNAVAILABLE"): bootstrap(api)
+
 
 def test_rejects_migration_seed_and_review_drift():
     api = Api(); api.migrations = api.migrations[:-1]
-    with pytest.raises(mod.CloudflareProviderError, match="D1_MIGRATION_SET_MISMATCH"): collect(api)
+    with pytest.raises(mod.CloudflareProviderError, match="D1_MIGRATION_SET_MISMATCH"): bootstrap(api)
     api = Api(); api.sources = api.sources[:-1]
-    with pytest.raises(mod.CloudflareProviderError, match="SOURCE_BASELINE_SEEDS_MISSING"): collect(api)
+    with pytest.raises(mod.CloudflareProviderError, match="SOURCE_BASELINE_SEEDS_MISSING"): bootstrap(api)
     api = Api(); api.missing_source_review = True
     with pytest.raises(mod.CloudflareProviderError, match="DISPATCHABLE_SOURCE_REVIEW_MISSING"): collect(api)
     api = Api(); api.missing_provider_review = True
     with pytest.raises(mod.CloudflareProviderError, match="DISPATCHABLE_PROVIDER_REVIEW_MISSING"): collect(api)
 
+
 def test_rejects_missing_required_or_legacy_secret_and_identity_drift():
-    api = Api(); api.secrets = [{"name":"WORKER_TOKEN"}]
-    with pytest.raises(mod.CloudflareProviderError, match="REQUIRED_WORKER_SECRETS_MISSING"): collect(api)
-    api = Api(); api.secrets.append({"name":"LEGACY_INGEST_TOKEN"})
-    with pytest.raises(mod.CloudflareProviderError, match="LEGACY_INGEST_SECRET_PRESENT"): collect(api)
+    api = Api(); api.secrets = [{"name": "WORKER_TOKEN"}]
+    with pytest.raises(mod.CloudflareProviderError, match="REQUIRED_WORKER_SECRETS_MISSING"): bootstrap(api)
+    api = Api(); api.secrets.append({"name": "LEGACY_INGEST_TOKEN"})
+    with pytest.raises(mod.CloudflareProviderError, match="LEGACY_INGEST_SECRET_PRESENT"): bootstrap(api)
     api = Api(); api.bindings[1]["text"] = "c" * 40
-    with pytest.raises(mod.CloudflareProviderError, match="WORKER_COMMIT_BINDING_MISMATCH"): collect(api)
+    with pytest.raises(mod.CloudflareProviderError, match="WORKER_COMMIT_BINDING_MISMATCH"): bootstrap(api)
     api = Api(); api.bindings[2]["text"] = "PRODUCTION"
-    with pytest.raises(mod.CloudflareProviderError, match="WORKER_DEPLOYMENT_MODE_MISMATCH"): collect(api)
+    with pytest.raises(mod.CloudflareProviderError, match="WORKER_DEPLOYMENT_MODE_MISMATCH"): bootstrap(api)

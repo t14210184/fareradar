@@ -66,7 +66,7 @@ def worker_snapshot(api: Any, worker_name: str) -> WorkerSnapshot:
     deployments = _result(api.get(f"/workers/scripts/{worker_name}/deployments"))
     if not isinstance(settings, dict) or deployments is None:
         return WorkerSnapshot(False, None, None, None, None)
-    bindings = [x for x in (settings.get("bindings") or []) if isinstance(x, dict)]
+    bindings = [item for item in (settings.get("bindings") or []) if isinstance(item, dict)]
     commit = cf._binding_value(bindings, "FARE_COMMIT_SHA")
     mode = cf._binding_value(bindings, "FARE_DEPLOYMENT_MODE")
     try:
@@ -94,7 +94,13 @@ def _required_env() -> dict[str, str]:
     return values
 
 
-def deploy_shadow(*, runner: Callable[..., Any] = subprocess.run, api_factory: Callable[[str, str], Any] = cf.CloudflareApi, readback: Callable[..., dict[str, Any]] = cf.collect_readback, probes: Callable[..., dict[str, Any]] = live_probe.run_probes) -> dict[str, Any]:
+def deploy_shadow(
+    *,
+    runner: Callable[..., Any] = subprocess.run,
+    api_factory: Callable[[str, str], Any] = cf.CloudflareApi,
+    readback: Callable[..., dict[str, Any]] = cf.collect_bootstrap_readback,
+    probes: Callable[..., dict[str, Any]] = live_probe.run_probes,
+) -> dict[str, Any]:
     expected = os.environ.get("FARE_SHADOW_EXPECTED_HEAD", "").lower()
     if not re.fullmatch(r"[0-9a-f]{40}", expected):
         raise ShadowDeployError("FARE_SHADOW_EXPECTED_HEAD_REQUIRED")
@@ -129,7 +135,14 @@ def deploy_shadow(*, runner: Callable[..., Any] = subprocess.run, api_factory: C
         deploy_unknown = True
 
     try:
-        state = readback(api, account_id=values["CLOUDFLARE_ACCOUNT_ID"], database_id=configured_d1, worker_name=worker_name, expected_head=head, expected_mode=MODE)
+        state = readback(
+            api,
+            account_id=values["CLOUDFLARE_ACCOUNT_ID"],
+            database_id=configured_d1,
+            worker_name=worker_name,
+            expected_head=head,
+            expected_mode=MODE,
+        )
     except cf.CloudflareProviderError as exc:
         after = worker_snapshot(api, worker_name)
         if after == before:
@@ -137,15 +150,25 @@ def deploy_shadow(*, runner: Callable[..., Any] = subprocess.run, api_factory: C
         raise ShadowDeployError("SHADOW_DEPLOY_PARTIAL_OR_AMBIGUOUS") from exc
 
     probe_result = probes(
-        base_url=state["worker_origin"], expected_head=head, expected_mode=MODE,
+        base_url=state["worker_origin"],
+        expected_head=head,
+        expected_mode=MODE,
         worker_token=values["FARE_WORKER_TOKEN"],
-        shadow_key_id=values["FARE_SHADOW_REVIEWER_KEY_ID"], shadow_secret=values["FARE_SHADOW_REVIEWER_SECRET"],
-        access_key_id=values["FARE_ACCESS_REVIEWER_KEY_ID"], access_secret=values["FARE_ACCESS_REVIEWER_SECRET"],
+        shadow_key_id=values["FARE_SHADOW_REVIEWER_KEY_ID"],
+        shadow_secret=values["FARE_SHADOW_REVIEWER_SECRET"],
+        access_key_id=values["FARE_ACCESS_REVIEWER_KEY_ID"],
+        access_secret=values["FARE_ACCESS_REVIEWER_SECRET"],
     )
-    cf.write_evidence(state)
+    cf.write_bootstrap_evidence(state)
     return {
-        "ok": True, "commit_sha": head, "deployment_mode": MODE, "version_id": state["version_id"],
-        "deploy_command_uncertain_but_readback_confirmed": deploy_unknown, "live_probes": probe_result,
+        "ok": True,
+        "commit_sha": head,
+        "deployment_mode": MODE,
+        "version_id": state["version_id"],
+        "deploy_command_uncertain_but_readback_confirmed": deploy_unknown,
+        "live_probes": probe_result,
+        "provider_readback_stage": "BOOTSTRAP_ONLY",
+        "next_gate": "HUMAN_ACCESS_REVIEW_THEN_FULL_CLOUDFLARE_READBACK",
     }
 
 

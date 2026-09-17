@@ -31,7 +31,8 @@ def env(monkeypatch):
         "FARE_ACCESS_REVIEWER_KEY_ID": "access-key",
         "FARE_ACCESS_REVIEWER_SECRET": "a" * 24,
     }
-    for k,v in values.items(): monkeypatch.setenv(k,v)
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
 
 
 def common(monkeypatch):
@@ -39,29 +40,29 @@ def common(monkeypatch):
     monkeypatch.setattr(mod, "require_clean_exact_head", lambda expected: HEAD)
     monkeypatch.setattr(mod.preflight, "code_ready", lambda head: True)
     monkeypatch.setattr(mod, "d1_id", lambda: DB)
-    monkeypatch.setattr(mod.cf, "write_evidence", lambda state: None)
+    monkeypatch.setattr(mod.cf, "write_bootstrap_evidence", lambda state: None)
 
 
 def state():
     return {
-        "readback_session_id":"session-1",
-        "observed_at":"2026-09-17T15:00:00Z",
-        "provider":"cloudflare",
-        "account_id":"acct",
-        "database_id":DB,
-        "worker_name":"fare-radar",
-        "worker_origin":"https://fare-radar.acct.workers.dev",
-        "cron_schedules":["* * * * *"],
-        "deployment_id":"dep-new",
-        "version_id":"v-new",
-        "commit_sha":HEAD,
-        "deployment_mode":"SHADOW_ACCEPTANCE",
-        "binding_verified":True,
-        "migrations_verified":True,
-        "baseline_seeds_verified":True,
-        "dispatchable_reviews_verified":True,
-        "secret_names":["WORKER_TOKEN","INGEST_HMAC_SECRETS"],
-        "legacy_ingest_auth_enabled":False,
+        "readback_session_id": "session-1",
+        "observed_at": "2026-09-17T15:00:00Z",
+        "provider": "cloudflare",
+        "account_id": "acct",
+        "database_id": DB,
+        "worker_name": "fare-radar",
+        "worker_origin": "https://fare-radar.acct.workers.dev",
+        "cron_schedules": ["* * * * *"],
+        "deployment_id": "dep-new",
+        "version_id": "v-new",
+        "commit_sha": HEAD,
+        "deployment_mode": "SHADOW_ACCEPTANCE",
+        "binding_verified": True,
+        "migrations_verified": True,
+        "baseline_seeds_verified": True,
+        "dispatchable_reviews_verified": False,
+        "secret_names": ["WORKER_TOKEN", "INGEST_HMAC_SECRETS"],
+        "legacy_ingest_auth_enabled": False,
     }
 
 
@@ -69,12 +70,14 @@ def test_build_precedes_one_shadow_only_deploy(monkeypatch):
     common(monkeypatch); calls=[]
     def runner(args, **kwargs):
         calls.append(args)
-        return SimpleNamespace(returncode=0,stdout="",stderr="")
-    monkeypatch.setattr(mod,"worker_snapshot",lambda api,name: mod.WorkerSnapshot(True,"old","SHADOW_ACCEPTANCE","dep-old","v-old"))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(mod, "worker_snapshot", lambda api, name: mod.WorkerSnapshot(True, "old", "SHADOW_ACCEPTANCE", "dep-old", "v-old"))
     probes=[]
-    result=mod.deploy_shadow(runner=runner,api_factory=lambda a,t:object(),readback=lambda *a,**k:state(),probes=lambda **k:(probes.append(k) or {"ok":True}))
+    result=mod.deploy_shadow(runner=runner, api_factory=lambda a,t: object(), readback=lambda *a,**k: state(), probes=lambda **k: (probes.append(k) or {"ok": True}))
     assert result["ok"] is True
-    assert calls[0] == ["npm","run","build"]
+    assert result["provider_readback_stage"] == "BOOTSTRAP_ONLY"
+    assert result["next_gate"] == "HUMAN_ACCESS_REVIEW_THEN_FULL_CLOUDFLARE_READBACK"
+    assert calls[0] == ["npm", "run", "build"]
     assert calls[1].count("deploy") == 1
     joined=" ".join(calls[1])
     assert "wrangler@4.131.2" in joined and "--keep-vars" in calls[1] and "--strict" in calls[1]
@@ -84,36 +87,37 @@ def test_build_precedes_one_shadow_only_deploy(monkeypatch):
     assert len(probes) == 1
 
 
-def test_unknown_deploy_is_never_resent_when_readback_confirms(monkeypatch):
+def test_unknown_deploy_is_never_resent_when_bootstrap_readback_confirms(monkeypatch):
     common(monkeypatch); calls=[]
     def runner(args, **kwargs):
         calls.append(args)
-        return SimpleNamespace(returncode=0 if args[:3]==["npm","run","build"] else 1,stdout="",stderr="lost response")
-    monkeypatch.setattr(mod,"worker_snapshot",lambda api,name: mod.WorkerSnapshot(True,"old","SHADOW_ACCEPTANCE","dep-old","v-old"))
-    result=mod.deploy_shadow(runner=runner,api_factory=lambda a,t:object(),readback=lambda *a,**k:state(),probes=lambda **k:{"ok":True})
+        return SimpleNamespace(returncode=0 if args[:3] == ["npm", "run", "build"] else 1, stdout="", stderr="lost response")
+    monkeypatch.setattr(mod, "worker_snapshot", lambda api, name: mod.WorkerSnapshot(True, "old", "SHADOW_ACCEPTANCE", "dep-old", "v-old"))
+    result=mod.deploy_shadow(runner=runner, api_factory=lambda a,t: object(), readback=lambda *a,**k: state(), probes=lambda **k: {"ok": True})
     assert result["deploy_command_uncertain_but_readback_confirmed"] is True
-    assert len([x for x in calls if "deploy" in x]) == 1
+    assert len([command for command in calls if "deploy" in command]) == 1
 
 
 def test_unknown_deploy_not_applied_vs_ambiguous(monkeypatch):
     common(monkeypatch)
-    runner=lambda args,**kwargs: SimpleNamespace(returncode=0 if args[:3]==["npm","run","build"] else 1,stdout="",stderr="")
+    runner=lambda args,**kwargs: SimpleNamespace(returncode=0 if args[:3] == ["npm", "run", "build"] else 1, stdout="", stderr="")
     readback=lambda *a,**k: (_ for _ in ()).throw(mod.cf.CloudflareProviderError("mismatch"))
-    before=mod.WorkerSnapshot(True,"old","SHADOW_ACCEPTANCE","dep-old","v-old")
+    before=mod.WorkerSnapshot(True, "old", "SHADOW_ACCEPTANCE", "dep-old", "v-old")
     seq=iter([before,before])
-    monkeypatch.setattr(mod,"worker_snapshot",lambda api,name: next(seq))
-    with pytest.raises(mod.ShadowDeployError,match="SHADOW_DEPLOY_NOT_APPLIED"):
-        mod.deploy_shadow(runner=runner,api_factory=lambda a,t:object(),readback=readback,probes=lambda **k:{})
+    monkeypatch.setattr(mod, "worker_snapshot", lambda api,name: next(seq))
+    with pytest.raises(mod.ShadowDeployError, match="SHADOW_DEPLOY_NOT_APPLIED"):
+        mod.deploy_shadow(runner=runner, api_factory=lambda a,t: object(), readback=readback, probes=lambda **k: {})
 
-    changed=mod.WorkerSnapshot(True,HEAD,"SHADOW_ACCEPTANCE","dep-new","v-partial")
-    seq=iter([before,changed]); monkeypatch.setattr(mod,"worker_snapshot",lambda api,name: next(seq))
-    with pytest.raises(mod.ShadowDeployError,match="SHADOW_DEPLOY_PARTIAL_OR_AMBIGUOUS"):
-        mod.deploy_shadow(runner=runner,api_factory=lambda a,t:object(),readback=readback,probes=lambda **k:{})
+    changed=mod.WorkerSnapshot(True, HEAD, "SHADOW_ACCEPTANCE", "dep-new", "v-partial")
+    seq=iter([before,changed]); monkeypatch.setattr(mod, "worker_snapshot", lambda api,name: next(seq))
+    with pytest.raises(mod.ShadowDeployError, match="SHADOW_DEPLOY_PARTIAL_OR_AMBIGUOUS"):
+        mod.deploy_shadow(runner=runner, api_factory=lambda a,t: object(), readback=readback, probes=lambda **k: {})
 
 
 def test_build_failure_stops_before_provider_read_or_deploy(monkeypatch):
     common(monkeypatch); calls=[]
-    def runner(args,**kwargs): calls.append(args); return SimpleNamespace(returncode=1,stdout="",stderr="build fail")
-    with pytest.raises(mod.ShadowDeployError,match="SHADOW_BUILD_FAILED"):
-        mod.deploy_shadow(runner=runner,api_factory=lambda a,t:(_ for _ in ()).throw(AssertionError("provider should not be touched")))
-    assert calls == [["npm","run","build"]]
+    def runner(args,**kwargs):
+        calls.append(args); return SimpleNamespace(returncode=1, stdout="", stderr="build fail")
+    with pytest.raises(mod.ShadowDeployError, match="SHADOW_BUILD_FAILED"):
+        mod.deploy_shadow(runner=runner, api_factory=lambda a,t: (_ for _ in ()).throw(AssertionError("provider should not be touched")))
+    assert calls == [["npm", "run", "build"]]

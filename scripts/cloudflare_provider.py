@@ -11,18 +11,20 @@ from dataclasses import dataclass
 from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-EVIDENCE_DIR = ROOT / "evidence" / "provider"
 REQUIRED_SECRETS = {"WORKER_TOKEN", "INGEST_HMAC_SECRETS"}
 ALLOWED_MODES = {"SHADOW_ACCEPTANCE", "PRODUCTION"}
 EXPECTED_CRONS = ["* * * * *"]
 
+
 class CloudflareProviderError(RuntimeError):
     pass
+
 
 @dataclass
 class Response:
     status: int
     data: Any
+
 
 class CloudflareApi:
     def __init__(self, account_id: str, token: str, timeout: float = 20.0):
@@ -38,9 +40,9 @@ class CloudflareApi:
             headers["content-type"] = "application/json"
         req = urllib.request.Request(self.base + path, data=body, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                raw = r.read().decode()
-                return Response(r.status, json.loads(raw) if raw else None)
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                raw = response.read().decode()
+                return Response(response.status, json.loads(raw) if raw else None)
         except urllib.error.HTTPError as exc:
             raw = exc.read().decode(errors="replace")
             try:
@@ -57,6 +59,22 @@ class CloudflareApi:
     def post(self, path: str, payload: Any) -> Response:
         return self.request("POST", path, payload)
 
+    def put(self, path: str, payload: Any) -> Response:
+        return self.request("PUT", path, payload)
+
+    def patch(self, path: str, payload: Any) -> Response:
+        return self.request("PATCH", path, payload)
+
+
+def evidence_dir() -> pathlib.Path:
+    raw = os.environ.get("FARE_EVIDENCE_ROOT", "")
+    if not raw:
+        return ROOT / "evidence" / "provider"
+    root = pathlib.Path(raw).expanduser()
+    if not root.is_absolute():
+        raise CloudflareProviderError("FARE_EVIDENCE_ROOT_MUST_BE_ABSOLUTE")
+    return root / "provider"
+
 
 def _result(response: Response, code: str) -> Any:
     if response.status != 200 or not isinstance(response.data, dict) or response.data.get("success") is not True:
@@ -71,7 +89,7 @@ def _query_rows(api: Any, database_id: str, sql: str) -> list[dict[str, Any]]:
     for block in blocks:
         if isinstance(block, dict):
             values = block.get("results") or []
-            rows.extend(x for x in values if isinstance(x, dict))
+            rows.extend(item for item in values if isinstance(item, dict))
     return rows
 
 
@@ -93,10 +111,7 @@ def _d1_binding(bindings: list[dict[str, Any]], database_id: str) -> bool:
 
 
 def _deployment_versions(result: Any) -> tuple[str, list[dict[str, Any]]]:
-    if isinstance(result, dict):
-        deployments = result.get("deployments") or []
-    else:
-        deployments = result or []
+    deployments = result.get("deployments") or [] if isinstance(result, dict) else result or []
     if not isinstance(deployments, list) or not deployments:
         raise CloudflareProviderError("WORKER_DEPLOYMENT_MISSING")
     deployment = deployments[0]
@@ -109,7 +124,7 @@ def _deployment_versions(result: Any) -> tuple[str, list[dict[str, Any]]]:
 
 
 def _migration_names() -> list[str]:
-    return sorted(p.name for p in (ROOT / "migrations").glob("*.sql"))
+    return sorted(path.name for path in (ROOT / "migrations").glob("*.sql"))
 
 
 def _seed_ids(path: pathlib.Path, key: str) -> set[str]:
@@ -117,7 +132,7 @@ def _seed_ids(path: pathlib.Path, key: str) -> set[str]:
     return {str(row[key]) for row in data if isinstance(row, dict) and row.get(key)}
 
 
-def collect_readback(api: Any, *, account_id: str, database_id: str, worker_name: str, expected_head: str, expected_mode: str) -> dict[str, Any]:
+def collect_bootstrap_readback(api: Any, *, account_id: str, database_id: str, worker_name: str, expected_head: str, expected_mode: str) -> dict[str, Any]:
     session_id = str(uuid.uuid4())
     observed_at = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
     if expected_mode not in ALLOWED_MODES:
@@ -130,7 +145,7 @@ def collect_readback(api: Any, *, account_id: str, database_id: str, worker_name
     settings = _result(api.get(f"/workers/scripts/{worker_name}/settings"), "WORKER_SETTINGS_READBACK_FAILED")
     if not isinstance(settings, dict):
         raise CloudflareProviderError("WORKER_SETTINGS_INVALID")
-    bindings = [x for x in (settings.get("bindings") or []) if isinstance(x, dict)]
+    bindings = [item for item in (settings.get("bindings") or []) if isinstance(item, dict)]
     if not _d1_binding(bindings, database_id):
         raise CloudflareProviderError("WORKER_D1_BINDING_MISMATCH")
     if _binding_value(bindings, "FARE_COMMIT_SHA") != expected_head:
@@ -146,7 +161,7 @@ def collect_readback(api: Any, *, account_id: str, database_id: str, worker_name
 
     schedules = _result(api.get(f"/workers/scripts/{worker_name}/schedules"), "WORKER_SCHEDULE_READBACK_FAILED")
     schedule_rows = schedules.get("schedules") if isinstance(schedules, dict) else schedules
-    crons = sorted(str(x.get("cron")) for x in (schedule_rows or []) if isinstance(x, dict) and x.get("cron"))
+    crons = sorted(str(item.get("cron")) for item in (schedule_rows or []) if isinstance(item, dict) and item.get("cron"))
     if crons != EXPECTED_CRONS:
         raise CloudflareProviderError("WORKER_CRON_SET_MISMATCH")
 
@@ -159,50 +174,22 @@ def collect_readback(api: Any, *, account_id: str, database_id: str, worker_name
 
     secrets_result = _result(api.get(f"/workers/scripts/{worker_name}/secrets"), "WORKER_SECRETS_READBACK_FAILED")
     secrets_list = secrets_result if isinstance(secrets_result, list) else (secrets_result or {}).get("secrets", []) if isinstance(secrets_result, dict) else []
-    secret_names = {str(x.get("name")) for x in secrets_list if isinstance(x, dict) and x.get("name")}
+    secret_names = {str(item.get("name")) for item in secrets_list if isinstance(item, dict) and item.get("name")}
     if not REQUIRED_SECRETS <= secret_names:
         raise CloudflareProviderError("REQUIRED_WORKER_SECRETS_MISSING")
     if "LEGACY_INGEST_TOKEN" in secret_names:
         raise CloudflareProviderError("LEGACY_INGEST_SECRET_PRESENT")
 
-    migrations = [str(x.get("name")) for x in _query_rows(api, database_id, "SELECT name FROM d1_migrations ORDER BY id")]
-    expected_migrations = _migration_names()
-    if migrations != expected_migrations:
+    migrations = [str(item.get("name")) for item in _query_rows(api, database_id, "SELECT name FROM d1_migrations ORDER BY id")]
+    if migrations != _migration_names():
         raise CloudflareProviderError("D1_MIGRATION_SET_MISMATCH")
 
-    source_ids = {str(x.get("source_id")) for x in _query_rows(api, database_id, "SELECT source_id FROM source_registry")}
-    provider_ids = {str(x.get("provider_id")) for x in _query_rows(api, database_id, "SELECT provider_id FROM provider_access_registry")}
+    source_ids = {str(item.get("source_id")) for item in _query_rows(api, database_id, "SELECT source_id FROM source_registry")}
+    provider_ids = {str(item.get("provider_id")) for item in _query_rows(api, database_id, "SELECT provider_id FROM provider_access_registry")}
     if not _seed_ids(ROOT / "config" / "sources.seed.json", "source_id") <= source_ids:
         raise CloudflareProviderError("SOURCE_BASELINE_SEEDS_MISSING")
     if not _seed_ids(ROOT / "config" / "providers.seed.json", "provider_id") <= provider_ids:
         raise CloudflareProviderError("PROVIDER_BASELINE_SEEDS_MISSING")
-
-    missing_source_reviews = _query_rows(api, database_id, """
-      SELECT s.source_id FROM source_registry s
-      WHERE s.lifecycle_state='ENABLED' AND s.kill_switch=0 AND NOT EXISTS (
-        SELECT 1 FROM source_onboarding_reviews r
-        WHERE r.source_id=s.source_id AND r.target_state='ENABLED'
-          AND r.terms_snapshot_at=s.terms_snapshot_at
-          AND r.reviewer_key_id IS NOT NULL AND r.human_review_sha256 IS NOT NULL
-      ) ORDER BY s.source_id
-    """)
-    if missing_source_reviews:
-        raise CloudflareProviderError("DISPATCHABLE_SOURCE_REVIEW_MISSING")
-
-    missing_provider_reviews = _query_rows(api, database_id, """
-      SELECT p.provider_id FROM provider_access_registry p
-      WHERE p.connector_state='IMPLEMENTED' AND p.kill_switch_state='CLEAR' AND NOT EXISTS (
-        SELECT 1 FROM provider_access_reviews r
-        WHERE r.provider_id=p.provider_id
-          AND r.access_basis=p.access_basis
-          AND r.terms_snapshot_at=p.terms_snapshot_at
-          AND r.rate_policy=p.rate_policy
-          AND (r.look_to_book_budget IS p.look_to_book_budget OR r.look_to_book_budget=p.look_to_book_budget)
-          AND r.reviewer_key_id IS NOT NULL AND r.human_review_sha256 IS NOT NULL
-      ) ORDER BY p.provider_id
-    """)
-    if missing_provider_reviews:
-        raise CloudflareProviderError("DISPATCHABLE_PROVIDER_REVIEW_MISSING")
 
     return {
         "readback_session_id": session_id,
@@ -221,14 +208,74 @@ def collect_readback(api: Any, *, account_id: str, database_id: str, worker_name
         "binding_verified": True,
         "migrations_verified": True,
         "baseline_seeds_verified": True,
-        "dispatchable_reviews_verified": True,
+        "dispatchable_reviews_verified": False,
         "secret_names": sorted(secret_names),
         "legacy_ingest_auth_enabled": False,
     }
 
 
+def collect_readback(api: Any, *, account_id: str, database_id: str, worker_name: str, expected_head: str, expected_mode: str) -> dict[str, Any]:
+    state = collect_bootstrap_readback(
+        api,
+        account_id=account_id,
+        database_id=database_id,
+        worker_name=worker_name,
+        expected_head=expected_head,
+        expected_mode=expected_mode,
+    )
+    missing_source_reviews = _query_rows(api, database_id, """
+      SELECT s.source_id FROM source_registry s
+      WHERE s.lifecycle_state='ENABLED' AND s.kill_switch=0 AND NOT EXISTS (
+        SELECT 1 FROM source_onboarding_reviews r
+        WHERE r.source_id=s.source_id AND r.target_state='ENABLED'
+          AND r.terms_snapshot_at=s.terms_snapshot_at
+          AND r.reviewer_key_id IS NOT NULL AND r.human_review_sha256 IS NOT NULL
+      ) ORDER BY s.source_id
+    """)
+    if missing_source_reviews:
+        raise CloudflareProviderError("DISPATCHABLE_SOURCE_REVIEW_MISSING")
+    missing_provider_reviews = _query_rows(api, database_id, """
+      SELECT p.provider_id FROM provider_access_registry p
+      WHERE p.connector_state='IMPLEMENTED' AND p.kill_switch_state='CLEAR' AND NOT EXISTS (
+        SELECT 1 FROM provider_access_reviews r
+        WHERE r.provider_id=p.provider_id
+          AND r.access_basis=p.access_basis
+          AND r.terms_snapshot_at=p.terms_snapshot_at
+          AND r.rate_policy=p.rate_policy
+          AND (r.look_to_book_budget IS p.look_to_book_budget OR r.look_to_book_budget=p.look_to_book_budget)
+          AND r.reviewer_key_id IS NOT NULL AND r.human_review_sha256 IS NOT NULL
+      ) ORDER BY p.provider_id
+    """)
+    if missing_provider_reviews:
+        raise CloudflareProviderError("DISPATCHABLE_PROVIDER_REVIEW_MISSING")
+    state["dispatchable_reviews_verified"] = True
+    return state
+
+
+def write_bootstrap_evidence(state: dict[str, Any]) -> None:
+    directory = evidence_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    common = {"readback_session_id": state["readback_session_id"], "observed_at": state["observed_at"], "provider": "cloudflare"}
+    worker = {
+        **common,
+        "deployed": True,
+        "bootstrap_only": True,
+        "version_id": state["version_id"],
+        "deployment_id": state["deployment_id"],
+        "commit_sha": state["commit_sha"],
+        "deployment_mode": state["deployment_mode"],
+        "worker_origin": state["worker_origin"],
+        "cron_schedules": state["cron_schedules"],
+    }
+    (directory / "worker-deploy.json").write_text(json.dumps(worker, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (directory / "cloudflare-shadow-bootstrap.json").write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def write_evidence(state: dict[str, Any]) -> None:
-    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+    if state.get("dispatchable_reviews_verified") is not True:
+        raise CloudflareProviderError("FULL_READBACK_REVIEWS_NOT_VERIFIED")
+    directory = evidence_dir()
+    directory.mkdir(parents=True, exist_ok=True)
     common = {"readback_session_id": state["readback_session_id"], "observed_at": state["observed_at"], "provider": "cloudflare"}
     payloads = {
         "cloudflare-auth.json": {**common, "auth_verified": True, "account_id": state["account_id"]},
@@ -238,7 +285,7 @@ def write_evidence(state: dict[str, Any]) -> None:
         "cloudflare-readback.json": state,
     }
     for name, payload in payloads.items():
-        (EVIDENCE_DIR / name).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        (directory / name).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -252,13 +299,21 @@ def main() -> int:
         print(json.dumps({"ok": False, "error": "CLOUDFLARE_READBACK_ENV_INCOMPLETE"}, sort_keys=True))
         return 2
     try:
-        state = collect_readback(CloudflareApi(account_id, token), account_id=account_id, database_id=database_id, worker_name=worker_name, expected_head=expected_head, expected_mode=expected_mode)
+        state = collect_readback(
+            CloudflareApi(account_id, token),
+            account_id=account_id,
+            database_id=database_id,
+            worker_name=worker_name,
+            expected_head=expected_head,
+            expected_mode=expected_mode,
+        )
         write_evidence(state)
         print(json.dumps(state, sort_keys=True))
         return 0
     except CloudflareProviderError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True))
         return 2
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
