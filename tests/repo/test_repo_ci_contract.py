@@ -86,3 +86,8 @@ def test_prepush_rejects_bare_placeholder_but_allows_d1_sentinel():
         ("python3", "scripts/validate_invariants.py"),
         ("git", "diff", "--check", "HEAD"),
     )
+
+
+def test_github_protection_command_is_wired():
+    pkg = json.loads((ROOT / "package.json").read_text())
+    assert pkg["scripts"]["protect:github"] == "python3 scripts/github_provider.py protect"
