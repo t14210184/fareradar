@@ -36,14 +36,22 @@ def test_github_provider_evidence_requires_exact_head_ci_and_protection(monkeypa
     bad=dict(good,required_status_contexts=['lint']); assert not pf.github_readback_ok(bad,head)
     bad=dict(good,repository_full_name='other/fare-radar'); assert not pf.github_readback_ok(bad,head)
 def test_provider_evidence_requires_exact_head_freshness_and_secret_manifest(monkeypatch):
-    head='a'*40; observed='2026-09-15T03:30:00Z'
+    head='a'*40; observed='2026-09-15T03:30:00Z'; session='session-1'
     monkeypatch.setattr(pf,'d1_id',lambda:'db-real')
-    d1={'provider':'cloudflare','binding_verified':True,'database_id':'db-real','commit_sha':head,'observed_at':observed}
-    dep={'provider':'cloudflare','deployed':True,'version_id':'v1','commit_sha':head,'observed_at':observed}
-    sec={'provider':'cloudflare','required_secrets_verified':True,'secret_names':['WORKER_TOKEN','INGEST_HMAC_SECRETS'],'legacy_ingest_auth_enabled':False,'commit_sha':head,'observed_at':observed}
-    auth={'provider':'cloudflare','auth_verified':True,'observed_at':observed}
+    d1={'provider':'cloudflare','readback_session_id':session,'binding_verified':True,'migrations_verified':True,'baseline_seeds_verified':True,'dispatchable_reviews_verified':True,'database_id':'db-real','commit_sha':head,'observed_at':observed}
+    dep={'provider':'cloudflare','readback_session_id':session,'deployed':True,'version_id':'v1','deployment_mode':'SHADOW_ACCEPTANCE','commit_sha':head,'observed_at':observed}
+    sec={'provider':'cloudflare','readback_session_id':session,'required_secrets_verified':True,'secret_names':['WORKER_TOKEN','INGEST_HMAC_SECRETS'],'legacy_ingest_auth_enabled':False,'commit_sha':head,'observed_at':observed}
+    auth={'provider':'cloudflare','readback_session_id':session,'auth_verified':True,'observed_at':observed}
     monkeypatch.setattr(pf,'evidence_recent',lambda data,max_hours=24,now=None: True)
+    assert pf.cloudflare_session_ok(auth,d1,dep,sec)
     assert pf.d1_readback_ok(d1,head) and pf.deploy_ok(dep,head) and pf.secrets_ok(sec,head) and pf.auth_ok(auth)
     d1['commit_sha']='b'*40; assert not pf.d1_readback_ok(d1,head)
+    d1['commit_sha']=head; d1['migrations_verified']=False; assert not pf.d1_readback_ok(d1,head)
     sec['secret_names']=['INGEST_HMAC_SECRETS']; assert not pf.secrets_ok(sec,head)
     sec['secret_names']=['WORKER_TOKEN','INGEST_HMAC_SECRETS']; sec['legacy_ingest_auth_enabled']=True; assert not pf.secrets_ok(sec,head)
+def test_cloudflare_provider_evidence_cannot_be_spliced_across_sessions():
+    a={'readback_session_id':'one'}; b={'readback_session_id':'one'}; c={'readback_session_id':'one'}; d={'readback_session_id':'one'}
+    assert pf.cloudflare_session_ok(a,b,c,d)
+    d['readback_session_id']='two'
+    assert not pf.cloudflare_session_ok(a,b,c,d)
+    assert not pf.cloudflare_session_ok({},b,c,d)
