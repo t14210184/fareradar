@@ -18,7 +18,8 @@
     "readback:github": "python3 scripts/github_provider.py readback",
     "bootstrap:github": "python3 scripts/github_provider.py bootstrap",
     "readback:cloudflare": "python3 scripts/cloudflare_provider.py",
-    "probe:live": "python3 scripts/live_probe.py"
+    "probe:live": "python3 scripts/live_probe.py",
+    "deploy:shadow": "python3 scripts/deploy_shadow.py"
   },
   "devDependencies": {
     "typescript": "5.8.3"
