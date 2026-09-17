@@ -62,9 +62,12 @@ def github_readback_ok(data,head):
     expected=os.environ.get('FARE_GITHUB_REPOSITORY')
     contexts=set(data.get('required_status_contexts') or []) if data else set()
     return bool(data and data.get('provider')=='github' and data.get('visibility')=='public' and data.get('default_branch')=='main' and data.get('ci_conclusion')=='success' and data.get('branch_protection_verified') is True and 'test' in contexts and evidence_commit_ok(data,head) and evidence_recent(data,24) and (not expected or data.get('repository_full_name')==expected))
+def cloudflare_session_ok(*items):
+    ids=[str(x.get('readback_session_id') or '') for x in items]
+    return bool(items) and all(ids) and len(set(ids))==1
 def auth_ok(data): return bool(data and data.get('provider')=='cloudflare' and data.get('auth_verified') is True and evidence_recent(data,24))
-def d1_readback_ok(data,head): return bool(data and data.get('provider')=='cloudflare' and data.get('binding_verified') is True and data.get('database_id')==d1_id() and evidence_commit_ok(data,head) and evidence_recent(data,24))
-def deploy_ok(data,head): return bool(data and data.get('provider')=='cloudflare' and data.get('deployed') is True and data.get('version_id') and evidence_commit_ok(data,head) and evidence_recent(data,24))
+def d1_readback_ok(data,head): return bool(data and data.get('provider')=='cloudflare' and data.get('binding_verified') is True and data.get('migrations_verified') is True and data.get('baseline_seeds_verified') is True and data.get('dispatchable_reviews_verified') is True and data.get('database_id')==d1_id() and evidence_commit_ok(data,head) and evidence_recent(data,24))
+def deploy_ok(data,head): return bool(data and data.get('provider')=='cloudflare' and data.get('deployed') is True and data.get('version_id') and data.get('deployment_mode') in {'SHADOW_ACCEPTANCE','PRODUCTION'} and evidence_commit_ok(data,head) and evidence_recent(data,24))
 def secrets_ok(data,head):
     names=set(data.get('secret_names') or []) if data else set()
     return bool(data and data.get('provider')=='cloudflare' and data.get('required_secrets_verified') is True and REQUIRED_WORKER_SECRETS<=names and data.get('legacy_ingest_auth_enabled') is False and evidence_commit_ok(data,head) and evidence_recent(data,24))
@@ -83,6 +86,7 @@ def evaluate(remote=None):
     if d1_id() in PLACEHOLDERS:blockers.append('D1_DATABASE_ID_MISSING')
     if legacy_ingest_enabled():blockers.append('LEGACY_INGEST_AUTH_ENABLED')
     auth=provider_evidence('cloudflare-auth') or {}; d1=provider_evidence('d1-readback') or {}; deploy=provider_evidence('worker-deploy') or {}; secrets=provider_evidence('production-secrets') or {}
+    if not cloudflare_session_ok(auth,d1,deploy,secrets):blockers.append('CLOUDFLARE_READBACK_SESSION_MISMATCH')
     if not auth_ok(auth):blockers.append('CLOUDFLARE_AUTH_READBACK_MISSING')
     if not d1_readback_ok(d1,head):blockers.append('D1_PROVIDER_READBACK_MISSING')
     if not deploy_ok(deploy,head):blockers.append('WORKER_DEPLOY_READBACK_MISSING')
