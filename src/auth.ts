@@ -18,9 +18,21 @@ function timeValid(value:string|null|undefined,now:number,before:boolean){if(!va
 function pathAllowed(raw:string,path:string){try{const xs=JSON.parse(raw);return Array.isArray(xs)&&xs.some(x=>typeof x==="string"&&x.startsWith("/")&&(x.endsWith("/")?path.startsWith(x):path===x));}catch{return false;}}
 const ACCESS_REVIEWER_PATHS=new Set(["/audit/evidence","/audit/evidence/readback","/sources/onboarding/review","/providers/access/review","/access/reviews/readback"]);
 const SHADOW_REVIEWER_PATHS=new Set(["/shadow/reviews","/shadow/reviews/readback","/shadow/acceptance/readback"]);
+const SOURCE_SCOPED_PATHS=new Set(["/ingest","/ingest/email"]);
+const AGENCY_SCOPED_PATHS=new Set(["/ingest/agency","/agency-rechecks/lease","/agency-rechecks/complete","/agency-checkouts/lease","/agency-checkouts/complete"]);
+const PROVIDER_SCOPED_PATHS=new Set(["/offers/ingest","/pricing-quotes/ingest","/providers/runtime/readback","/provider-jobs/lease","/provider-jobs/complete","/provider-search/enqueue","/checkout-reprice/enqueue","/payment-profiles/upsert"]);
 export function principalRoleAllowsPath(role:string,path:string){
   if(role==="ACCESS_REVIEWER")return ACCESS_REVIEWER_PATHS.has(path);
   if(role==="SHADOW_REVIEWER")return SHADOW_REVIEWER_PATHS.has(path);
+  return true;
+}
+export function principalScopeAllowsPath(p:Pick<AuthPrincipal,"role"|"source_id"|"agency_id"|"provider_id">,path:string){
+  if(p.role==="ACCESS_REVIEWER"||p.role==="SHADOW_REVIEWER")return true;
+  const scopeCount=Number(!!p.source_id)+Number(!!p.agency_id)+Number(!!p.provider_id);
+  if(scopeCount>1)return false;
+  if(p.source_id)return SOURCE_SCOPED_PATHS.has(path);
+  if(p.agency_id)return AGENCY_SCOPED_PATHS.has(path);
+  if(p.provider_id)return PROVIDER_SCOPED_PATHS.has(path);
   return true;
 }
 
@@ -31,12 +43,14 @@ export async function authorizeRequest(req:Request,body:string,env:AuthEnv):Prom
     if(!validNonce(nonce))return null;
     const row=await env.DB.prepare("SELECT key_id,role,source_id,agency_id,provider_id,secret_slot,allowed_paths_json,enabled,not_before,expires_at FROM ingest_auth_keys WHERE key_id=?").bind(keyId).first<any>();
     if(!row||Number(row.enabled)!==1||!timeValid(row.not_before,now,true)||!timeValid(row.expires_at,now,false))return null;
-    const path=new URL(req.url).pathname;if(!pathAllowed(row.allowed_paths_json,path)||!principalRoleAllowsPath(row.role,path))return null;
+    const path=new URL(req.url).pathname;
+    const scope={role:String(row.role??""),source_id:row.source_id??null,agency_id:row.agency_id??null,provider_id:row.provider_id??null};
+    if(!pathAllowed(row.allowed_paths_json,path)||!principalRoleAllowsPath(scope.role,path)||!principalScopeAllowsPath(scope,path))return null;
     const secret=parseSecrets(env.INGEST_HMAC_SECRETS)[row.secret_slot];if(!secret)return null;
     const bodyHash=await sha256(body);const canonical=[keyId,ts,nonce,req.method.toUpperCase(),path,bodyHash].join("\n");if(!safeEq(sig,await sign(secret,canonical)))return null;
     const requestHash=await sha256(canonical);const usedAt=new Date(now).toISOString();const expiresAt=new Date(now+10*60_000).toISOString();
     try{await env.DB.prepare("INSERT INTO used_request_nonces(key_id,nonce,request_sha256,used_at,expires_at) VALUES(?,?,?,?,?)").bind(keyId,nonce,requestHash,usedAt,expiresAt).run();}catch{return null;}
-    return {key_id:keyId,role:row.role,source_id:row.source_id??null,agency_id:row.agency_id??null,provider_id:row.provider_id??null,legacy:false};
+    return {key_id:keyId,role:scope.role,source_id:scope.source_id,agency_id:scope.agency_id,provider_id:scope.provider_id,legacy:false};
   }
   if(env.ALLOW_LEGACY_INGEST_TOKEN==="1"&&env.INGEST_HMAC_SECRET&&sig){const expected=await sign(env.INGEST_HMAC_SECRET,`${ts}.${body}`);if(safeEq(sig,expected))return {key_id:"legacy",role:"LEGACY_TEST_ONLY",source_id:null,agency_id:null,provider_id:null,legacy:true};}
   return null;
@@ -44,14 +58,11 @@ export async function authorizeRequest(req:Request,body:string,env:AuthEnv):Prom
 
 export function principalAllowsPayload(p:AuthPrincipal,payload:any,path:string){
   if(p.legacy)return true;
-  if((path==="/ingest/agency"||path==="/agency-rechecks/lease"||path==="/agency-rechecks/complete"||path==="/agency-checkouts/lease"||path==="/agency-checkouts/complete")&&p.agency_id&&payload?.agency_id!==p.agency_id)return false;
-  if((path==="/ingest/email"||path==="/ingest")&&p.source_id&&payload?.source_id!==p.source_id)return false;
+  if(AGENCY_SCOPED_PATHS.has(path)&&p.agency_id&&payload?.agency_id!==p.agency_id)return false;
+  if(SOURCE_SCOPED_PATHS.has(path)&&p.source_id&&payload?.source_id!==p.source_id)return false;
   if(path==="/sources/onboarding/review"&&p.source_id&&payload?.source_id!==p.source_id)return false;
   if(path==="/providers/access/review"&&p.provider_id&&payload?.provider_id!==p.provider_id)return false;
-  if(p.provider_id){
-    const providerPaths=new Set(["/offers/ingest","/pricing-quotes/ingest","/providers/runtime/readback","/provider-jobs/lease","/provider-jobs/complete","/provider-search/enqueue","/checkout-reprice/enqueue","/payment-profiles/upsert"]);
-    if(providerPaths.has(path)){const claimed=payload?.provider_id??payload?.provider;if(claimed!==p.provider_id)return false;}
-  }
+  if(p.provider_id&&PROVIDER_SCOPED_PATHS.has(path)){const claimed=payload?.provider_id??payload?.provider;if(claimed!==p.provider_id)return false;}
   return true;
 }
 export async function cleanupExpiredNonces(db:D1Database,nowIso:string){await db.prepare("DELETE FROM used_request_nonces WHERE expires_at<=?").bind(nowIso).run();}
