@@ -1,0 +1,33 @@
+import { DatabaseSync } from 'node:sqlite'; import fs from 'node:fs';
+import { ingestAgencyOffer } from '../dist/partner_ingest.js';
+import { projectDomainEvents } from '../dist/ingest.js';
+import { leaseAgencyRechecks, completeAgencyRecheck } from '../dist/agency_recheck.js';
+import { leaseAgencyCheckouts, completeAgencyCheckout } from '../dist/agency_checkout.js';
+import { expireAgencyOffers } from '../dist/agency_expiry.js';
+import { projectAlertIntents } from '../dist/outbox.js';
+class Stmt { constructor(s){this.s=s;this.args=[]} bind(...v){this.args=v;return this} async run(){return {success:true,meta:this.s.run(...this.args)}} async first(){return this.s.get(...this.args)??null} async all(){return {results:this.s.all(...this.args)}} }
+class DB { constructor(db){this.db=db} prepare(sql){return new Stmt(this.db.prepare(sql))} async batch(stmts){this.db.exec('BEGIN IMMEDIATE');try{const o=[];for(const s of stmts)o.push(await s.run());this.db.exec('COMMIT');return o}catch(e){this.db.exec('ROLLBACK');throw e}} }
+const raw=new DatabaseSync(':memory:');for(const f of fs.readdirSync(new URL('../migrations/',import.meta.url)).filter(x=>x.endsWith('.sql')).sort())raw.exec(fs.readFileSync(new URL(`../migrations/${f}`,import.meta.url),'utf8'));const db=new DB(raw);
+raw.prepare("insert into source_registry(source_id,source_class,canonical_domain_or_account,access_basis,fetch_method,lifecycle_state,verification_authority,terms_snapshot_at,min_interval_ms,kill_switch) values('src-a1','PARTNER_PUSH','a1.example','PARTNER_CONTRACT','WEBHOOK','SHADOW','MEDIUM','2026-09-15T00:00:00Z',300000,0)").run();
+raw.prepare("insert into agency_partner_registry(agency_id,source_id,status,verified_business,terms_snapshot_at) values('a1','src-a1','ENABLED',1,'2026-09-15T00:00:00Z')").run();
+const offer={agency_offer_id:'ao-exp',agency_id:'a1',source_id:'src-a1',observation_id:'obs-exp',product_id:'pkg-exp',allotment_type:'CLEARANCE',origin:'TPE',destination:'OKA',departure_at:'2026-09-20T08:00:00+08:00',return_at:'2026-09-23T12:00:00+09:00',price:6999,currency:'TWD',tax_inclusion:'INCLUDED',baggage:'20KG',seats_total:2,seats_available:2,inventory_hint:'LIMITED',booking_deadline:'2026-09-16T18:00:00+08:00',payment_deadline:'2026-09-15T10:30:00+08:00',ticketing_deadline:'2026-09-16T20:00:00+08:00',refund_change_terms:'NONREFUNDABLE',booking_or_contact_channel:'https://a1.example/book',observed_at:'2026-09-15T00:00:00Z',content_sha256:'a'.repeat(64),canonical_url:'https://a1.example/deal/pkg-exp'};
+await ingestAgencyOffer(db,offer,'2026-09-15T00:00:01Z');await projectDomainEvents(db,'2026-09-15T00:00:02Z','projector',2);
+const seller=await leaseAgencyRechecks(db,{agency_id:'a1',worker_id:'seller'},'2026-09-15T01:00:00Z');
+await completeAgencyRecheck(db,{recheck_id:'r-exp',queue_id:seller[0].queue_id,agency_offer_id:'ao-exp',agency_id:'a1',worker_id:'seller',readback_basis:'PARTNER_API',source_url:'https://a1.example/api/pkg-exp',content_sha256:'b'.repeat(64),observed_at:'2026-09-15T01:00:10Z',price:6888,currency:'TWD',seats_available:1,booking_deadline:offer.booking_deadline,payment_deadline:offer.payment_deadline,ticketing_deadline:offer.ticketing_deadline},'2026-09-15T01:00:11Z');
+const checkout=await leaseAgencyCheckouts(db,{agency_id:'a1',worker_id:'checkout'},'2026-09-15T01:01:00Z');
+await completeAgencyCheckout(db,{checkout_id:'co-exp',job_id:checkout[0].job_id,agency_offer_id:'ao-exp',agency_id:'a1',worker_id:'checkout',readback_basis:'PARTNER_PORTAL_CHECKOUT',checkout_url:'https://a1.example/checkout/pkg-exp',content_sha256:'c'.repeat(64),observed_at:'2026-09-15T01:01:10Z',final_price:7018,currency:'TWD',seats_available:1,booking_deadline:offer.booking_deadline,payment_deadline:offer.payment_deadline,total_includes_taxes:true,total_includes_mandatory_fees:true},'2026-09-15T01:01:11Z');
+await projectAlertIntents(db,'2026-09-15T01:02:00Z',10);
+const before=raw.prepare("select state,seller_verification_state,payment_deadline from agency_inventory_offers where agency_offer_id='ao-exp'").get();
+const result=await expireAgencyOffers(db,'2026-09-15T02:31:00Z',1);const again=await expireAgencyOffers(db,'2026-09-15T02:32:00Z',1);
+const after=raw.prepare("select state,seller_verification_state,expiry_reason,expired_at from agency_inventory_offers where agency_offer_id='ao-exp'").get();
+const life=raw.prepare("select previous_state,new_state,reason,effective_at from agency_offer_lifecycle_events where agency_offer_id='ao-exp' order by created_at desc limit 1").get();
+const pendingOld=raw.prepare("select count(*) n from notification_outbox where notification_id like 'agency-%:ao-exp:%' and state='PENDING'").get().n;
+const cancelled=raw.prepare("select count(*) n from notification_outbox where notification_id like 'agency-%:ao-exp:%' and state='CANCELLED'").get().n;
+const expiryIntent=raw.prepare("select payload_json from candidate_alert_intents where intent_id='agency-expiry:ao-exp:PAYMENT_DEADLINE_PASSED'").get();
+await projectAlertIntents(db,'2026-09-15T02:31:01Z',10);
+const updateOutbox=raw.prepare("select state,payload_json from notification_outbox where notification_id='agency-expiry:ao-exp:PAYMENT_DEADLINE_PASSED'").get();
+const staleLease=await leaseAgencyCheckouts(db,{agency_id:'a1',worker_id:'late'},'2026-09-15T02:31:02Z');
+const expiredOffer={...offer,agency_offer_id:'ao-old',observation_id:'obs-old',product_id:'pkg-old',booking_deadline:'2026-09-15T01:00:00+08:00',payment_deadline:null,ticketing_deadline:null,observed_at:'2026-09-15T00:30:00Z',content_sha256:'d'.repeat(64),canonical_url:'https://a1.example/deal/pkg-old'};
+const old=await ingestAgencyOffer(db,expiredOffer,'2026-09-15T02:31:03Z');await projectDomainEvents(db,'2026-09-15T02:31:04Z','projector2',2);
+const oldQueue=raw.prepare("select count(*) n from candidate_priority_queue where signal_id='ao-old'").get().n;const oldLife=raw.prepare("select reason from agency_offer_lifecycle_events where agency_offer_id='ao-old'").get();
+console.log(JSON.stringify({before,result,again,after,life,pendingOld,cancelled,expiryPayload:JSON.parse(expiryIntent.payload_json),updateOutbox:{state:updateOutbox.state,payload:JSON.parse(updateOutbox.payload_json)},staleLease:staleLease.length,old,oldQueue,oldLife}));

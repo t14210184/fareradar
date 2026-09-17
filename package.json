@@ -1,0 +1,28 @@
+{
+  "name": "fare-radar",
+  "version": "1.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check:ts": "tsc -p tsconfig.json --noEmit",
+    "test": "pytest -q",
+    "check": "npm run check:ts && pytest -q",
+    "check:invariants": "python3 scripts/validate_invariants.py",
+    "gates": "python3 scripts/gate_evidence.py",
+    "preflight": "python3 scripts/production_preflight.py",
+    "deploy:plan": "python3 scripts/deploy_plan.py",
+    "check:wrangler": "npm run build && npx --yes wrangler@4.131.2 deploy --dry-run --config wrangler.ci.jsonc",
+    "shadow:review": "python3 scripts/shadow_review.py",
+    "access:review": "python3 scripts/access_review_runtime.py",
+    "readback:github": "python3 scripts/github_provider.py readback",
+    "bootstrap:github": "python3 scripts/github_provider.py bootstrap",
+    "readback:cloudflare": "python3 scripts/cloudflare_provider.py",
+    "probe:live": "python3 scripts/live_probe.py",
+    "deploy:shadow": "python3 scripts/deploy_shadow.py",
+    "deploy:production": "python3 scripts/deploy_production.py"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3"
+  }
+}

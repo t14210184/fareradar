@@ -1,0 +1,2 @@
+ALTER TABLE cost_coverage_assertions ADD COLUMN evidence_kind TEXT NOT NULL DEFAULT 'COST_EVIDENCE'
+  CHECK(evidence_kind IN ('COST_EVIDENCE','POLICY_RECORD','PRICING_QUOTE'));
