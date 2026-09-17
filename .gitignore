@@ -5,4 +5,7 @@ __pycache__/
 *.db
 *.sqlite
 node_modules/
-evidence/*.json
+/evidence/*.json
+/evidence/**/*.json
+/evidence/*.jsonl
+/evidence/**/*.jsonl

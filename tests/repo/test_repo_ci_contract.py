@@ -1,19 +1,72 @@
-import json, pathlib
-ROOT=pathlib.Path(__file__).resolve().parents[2]
+from __future__ import annotations
+
+import importlib.util
+import json
+import pathlib
+import subprocess
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+def load_prepush():
+    spec = importlib.util.spec_from_file_location("prepush_acceptance", ROOT / "scripts" / "prepush_acceptance.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
 
 def test_ci_contract_present_and_pins_wrangler_dry_run():
-    ci=(ROOT/'.github/workflows/ci.yml').read_text()
-    pkg=json.loads((ROOT/'package.json').read_text())
-    assert 'npm run check:wrangler' in ci
-    cmd=pkg['scripts']['check:wrangler']
-    assert 'npm run build' in cmd
-    assert 'wrangler@4.131.2 deploy --dry-run --config wrangler.ci.jsonc' in cmd
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    pkg = json.loads((ROOT / "package.json").read_text())
+    assert "npm run check:wrangler" in ci
+    cmd = pkg["scripts"]["check:wrangler"]
+    assert "npm run build" in cmd
+    assert "wrangler@4.131.2 deploy --dry-run --config wrangler.ci.jsonc" in cmd
+
 
 def test_ci_wrangler_uses_synthetic_d1_but_production_stays_fail_closed():
-    ci=json.loads((ROOT/'wrangler.ci.jsonc').read_text())
-    prod=json.loads((ROOT/'wrangler.jsonc').read_text())
-    assert ci['triggers']['crons']==['* * * * *']
-    assert prod['triggers']['crons']==['* * * * *']
-    assert ci['d1_databases'][0]['database_id']=='00000000-0000-0000-0000-000000000001'
-    assert prod['d1_databases'][0]['database_id']=='REPLACE_WITH_D1_DATABASE_ID'
-    assert ci['d1_databases'][0]['database_id'] != prod['d1_databases'][0]['database_id']
+    ci = json.loads((ROOT / "wrangler.ci.jsonc").read_text())
+    prod = json.loads((ROOT / "wrangler.jsonc").read_text())
+    assert ci["triggers"]["crons"] == ["* * * * *"]
+    assert prod["triggers"]["crons"] == ["* * * * *"]
+    assert ci["d1_databases"][0]["database_id"] == "00000000-0000-0000-0000-000000000001"
+    assert prod["d1_databases"][0]["database_id"] == "REPLACE_WITH_D1_DATABASE_ID"
+    assert ci["d1_databases"][0]["database_id"] != prod["d1_databases"][0]["database_id"]
+
+
+def test_nested_runtime_evidence_is_gitignored():
+    for path in (
+        "evidence/provider/github-readback.json",
+        "evidence/provider/cloudflare-worker.json",
+        "evidence/shadow-acceptance.json",
+        "evidence/private/reviews.jsonl",
+    ):
+        result = subprocess.run(["git", "check-ignore", "-q", path], cwd=ROOT, check=False)
+        assert result.returncode == 0, path
+
+
+def test_prepush_gate_and_hook_contract():
+    pkg = json.loads((ROOT / "package.json").read_text())
+    assert pkg["scripts"]["check:prepush"] == "python3 scripts/prepush_acceptance.py"
+    assert pkg["scripts"]["hooks:install"] == "git config core.hooksPath .githooks"
+    hook = ROOT / ".githooks" / "pre-push"
+    assert hook.read_text().strip().endswith("python3 scripts/prepush_acceptance.py")
+    mode = subprocess.check_output(["git", "ls-files", "-s", ".githooks/pre-push"], cwd=ROOT, text=True)
+    assert mode.startswith("100755 ")
+
+
+def test_prepush_rejects_bare_placeholder_but_allows_d1_sentinel():
+    mod = load_prepush()
+    token = "PLACE" + "HOLDER"
+    assert mod.contains_forbidden_placeholder(f"value = {token}\n") is True
+    assert mod.contains_forbidden_placeholder('"database_id":"REPLACE_WITH_D1_DATABASE_ID"') is False
+    assert mod.CHECKS == (
+        ("npm", "run", "check:ts"),
+        ("npm", "run", "check:wrangler"),
+        ("pytest", "-q"),
+        ("python3", "scripts/validate_invariants.py"),
+        ("git", "diff", "--check", "HEAD"),
+    )

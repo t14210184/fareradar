@@ -9,6 +9,8 @@
     "test": "pytest -q",
     "check": "npm run check:ts && pytest -q",
     "check:invariants": "python3 scripts/validate_invariants.py",
+    "check:prepush": "python3 scripts/prepush_acceptance.py",
+    "hooks:install": "git config core.hooksPath .githooks",
     "gates": "python3 scripts/gate_evidence.py",
     "preflight": "python3 scripts/production_preflight.py",
     "deploy:plan": "python3 scripts/deploy_plan.py",
