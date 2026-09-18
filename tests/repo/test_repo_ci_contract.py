@@ -10,6 +10,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 CHECKOUT_SHA = "11d5960a326750d5838078e36cf38b85af677262"
 SETUP_NODE_SHA = "49933ea5288caeca8642d1e84afbd3f7d6820020"
 SETUP_PYTHON_SHA = "a26af69be951a213d495a4c3e4e4022e16d87065"
+UPLOAD_ARTIFACT_SHA = "ea165f8d65b6e75b540449e92b4886f43607fa02"
 
 
 def load_prepush():
@@ -96,3 +97,14 @@ def test_github_protection_command_is_wired():
 def test_worker_preview_urls_are_explicit():
     prod = json.loads((ROOT / "wrangler.jsonc").read_text())
     assert prod["preview_urls"] is True
+
+
+def test_gate_evidence_is_part_of_required_ci_and_artifact_is_pinned():
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    pkg = json.loads((ROOT / "package.json").read_text())
+    assert pkg["scripts"]["gates:all"] == "python3 scripts/run_gate_evidence.py"
+    assert "npm run gates:all" in ci
+    assert "FARE_EVIDENCE_ROOT: ${{ runner.temp }}/fare-evidence" in ci
+    assert f"actions/upload-artifact@{UPLOAD_ARTIFACT_SHA}" in ci
+    assert "actions/upload-artifact@v4" not in ci
+    assert "gate-evidence-${{ github.sha }}" in ci
