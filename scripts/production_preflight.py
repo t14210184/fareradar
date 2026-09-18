@@ -13,6 +13,115 @@ PLACEHOLDERS = {"", "REPLACE_WITH_D1_DATABASE_ID", "TODO", "TBD"}
 REQUIRED_WORKER_SECRETS = {"WORKER_TOKEN", "INGEST_HMAC_SECRETS"}
 EXPECTED_COMPLEX_STRATEGIES = {"S09", "S11", "S12", "S14", "S15"}
 
+BLOCKER_MANIFEST = {
+    "LOCAL_CODE_GATES_NOT_READY": {
+        "domain": "LOCAL_CODE",
+        "authority": "CHAT_OR_OPERATOR",
+        "requires_human_authority": False,
+        "requires_provider": False,
+        "provider": None,
+        "next_action": "npm run gates:all",
+    },
+    "GITHUB_REMOTE_MISSING": {
+        "domain": "LOCAL_CONFIGURATION",
+        "authority": "REPOSITORY_OPERATOR",
+        "requires_human_authority": False,
+        "requires_provider": True,
+        "provider": "github",
+        "next_action": "configure exact GitHub origin and rerun npm run readback:github",
+    },
+    "GITHUB_PROVIDER_READBACK_MISSING": {
+        "domain": "GITHUB_GOVERNANCE",
+        "authority": "GITHUB_REPOSITORY_ADMIN",
+        "requires_human_authority": True,
+        "requires_provider": True,
+        "provider": "github",
+        "next_action": "npm run protect:github && npm run readback:github",
+    },
+    "D1_DATABASE_ID_MISSING": {
+        "domain": "CLOUDFLARE_PROVISIONING",
+        "authority": "CLOUDFLARE_ACCOUNT",
+        "requires_human_authority": False,
+        "requires_provider": True,
+        "provider": "cloudflare",
+        "next_action": "npm run provision:shadow",
+    },
+    "LEGACY_INGEST_AUTH_ENABLED": {
+        "domain": "SECURITY_CONFIGURATION",
+        "authority": "CHAT_OR_OPERATOR",
+        "requires_human_authority": False,
+        "requires_provider": False,
+        "provider": None,
+        "next_action": "disable legacy ingest auth and rerun npm run preflight",
+    },
+    "CLOUDFLARE_READBACK_SESSION_MISMATCH": {
+        "domain": "CLOUDFLARE_READBACK",
+        "authority": "CLOUDFLARE_ACCOUNT",
+        "requires_human_authority": False,
+        "requires_provider": True,
+        "provider": "cloudflare",
+        "next_action": "npm run readback:cloudflare",
+    },
+    "CLOUDFLARE_AUTH_READBACK_MISSING": {
+        "domain": "CLOUDFLARE_READBACK",
+        "authority": "CLOUDFLARE_ACCOUNT",
+        "requires_human_authority": False,
+        "requires_provider": True,
+        "provider": "cloudflare",
+        "next_action": "npm run readback:cloudflare",
+    },
+    "D1_PROVIDER_READBACK_MISSING": {
+        "domain": "CLOUDFLARE_READBACK",
+        "authority": "CLOUDFLARE_ACCOUNT",
+        "requires_human_authority": False,
+        "requires_provider": True,
+        "provider": "cloudflare",
+        "next_action": "npm run readback:cloudflare",
+    },
+    "WORKER_DEPLOY_READBACK_MISSING": {
+        "domain": "CLOUDFLARE_WORKER",
+        "authority": "CLOUDFLARE_ACCOUNT",
+        "requires_human_authority": False,
+        "requires_provider": True,
+        "provider": "cloudflare",
+        "next_action": "npm run deploy:shadow",
+    },
+    "PRODUCTION_SECRETS_READBACK_MISSING": {
+        "domain": "CLOUDFLARE_SECRETS",
+        "authority": "CLOUDFLARE_ACCOUNT",
+        "requires_human_authority": False,
+        "requires_provider": True,
+        "provider": "cloudflare",
+        "next_action": "npm run deploy:shadow && npm run readback:cloudflare",
+    },
+    "SHADOW_ACCEPTANCE_MISSING": {
+        "domain": "SHADOW_ACCEPTANCE",
+        "authority": "HUMAN_REVIEWER_AND_TIME",
+        "requires_human_authority": True,
+        "requires_provider": True,
+        "provider": "cloudflare",
+        "next_action": "npm run shadow:review and continue exact-head Shadow observation until all thresholds pass",
+    },
+    "PRODUCTION_ACTIVATION_REQUIRED": {
+        "domain": "PRODUCTION_ACTIVATION",
+        "authority": "HUMAN_RELEASE_APPROVER",
+        "requires_human_authority": True,
+        "requires_provider": True,
+        "provider": "cloudflare",
+        "next_action": "set exact FARE_PRODUCTION_HUMAN_APPROVED_HEAD then npm run deploy:production",
+    },
+}
+
+
+def blocker_details(blockers):
+    details = []
+    for code in blockers:
+        metadata = BLOCKER_MANIFEST.get(code)
+        if metadata is None:
+            raise RuntimeError(f"BLOCKER_MANIFEST_MISSING:{code}")
+        details.append({"code": code, **metadata})
+    return details
+
 
 def evidence_root() -> pathlib.Path:
     raw = os.environ.get("FARE_EVIDENCE_ROOT", "")
@@ -285,7 +394,7 @@ def evaluate(remote=None):
         blockers.append("SHADOW_ACCEPTANCE_MISSING")
     if deploy_ok(deploy, head) and not production_deploy_ok(deploy, head):
         blockers.append("PRODUCTION_ACTIVATION_REQUIRED")
-    return {"code_ready": code_ready(head), "production_ready": not blockers, "commit_sha": head, "blockers": blockers}
+    return {"code_ready": code_ready(head), "production_ready": not blockers, "commit_sha": head, "blockers": blockers, "blocker_details": blocker_details(blockers)}
 
 
 if __name__ == "__main__":
