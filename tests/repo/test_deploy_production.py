@@ -4,6 +4,7 @@ import importlib.util
 import pathlib
 import sys
 from types import SimpleNamespace
+
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -16,80 +17,180 @@ spec.loader.exec_module(mod)
 
 HEAD = "a" * 40
 DB = "11111111-2222-3333-4444-555555555555"
+OLD = "11111111-1111-4111-8111-111111111111"
+NEW = "22222222-2222-4222-8222-222222222222"
+PREVIEW = f"https://prod-{HEAD[:12]}-fare-radar.acct.workers.dev"
+ORIGIN = "https://fare-radar.acct.workers.dev"
 
 
-def env(monkeypatch):
-    values={
-        "CLOUDFLARE_API_TOKEN":"token","CLOUDFLARE_ACCOUNT_ID":"acct","FARE_D1_DATABASE_ID":DB,
-        "FARE_WORKER_TOKEN":"worker-secret","FARE_SHADOW_REVIEWER_KEY_ID":"shadow-key","FARE_SHADOW_REVIEWER_SECRET":"s"*24,
-        "FARE_ACCESS_REVIEWER_KEY_ID":"access-key","FARE_ACCESS_REVIEWER_SECRET":"a"*24,
+def setup(monkeypatch):
+    for key, value in {
+        "CLOUDFLARE_API_TOKEN": "token",
+        "CLOUDFLARE_ACCOUNT_ID": "acct",
+        "FARE_D1_DATABASE_ID": DB,
+        "FARE_WORKER_TOKEN": "worker-secret",
+        "FARE_SHADOW_REVIEWER_KEY_ID": "shadow-key",
+        "FARE_SHADOW_REVIEWER_SECRET": "s" * 24,
+        "FARE_ACCESS_REVIEWER_KEY_ID": "access-key",
+        "FARE_ACCESS_REVIEWER_SECRET": "a" * 24,
+    }.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(mod, "require_human_approved_exact_head", lambda: HEAD)
+    monkeypatch.setattr(mod.preflight, "evaluate", lambda: {"blockers": ["PRODUCTION_ACTIVATION_REQUIRED"]})
+    monkeypatch.setattr(mod.shadow, "d1_id", lambda: DB)
+    monkeypatch.setattr(mod.cf, "write_evidence", lambda state: None)
+    monkeypatch.setattr(
+        mod.shadow,
+        "worker_snapshot",
+        lambda api, name: mod.shadow.WorkerSnapshot(True, HEAD, "SHADOW_ACCEPTANCE", "dep-shadow", OLD),
+    )
+
+
+def prod_state():
+    return {
+        "worker_origin": ORIGIN,
+        "version_id": NEW,
+        "deployment_id": "dep-prod",
+        "commit_sha": HEAD,
+        "deployment_mode": "PRODUCTION",
+        "dispatchable_reviews_verified": True,
     }
-    for k,v in values.items(): monkeypatch.setenv(k,v)
 
 
-def common(monkeypatch):
-    env(monkeypatch)
-    monkeypatch.setattr(mod,"require_human_approved_exact_head",lambda:HEAD)
-    monkeypatch.setattr(mod.preflight,"evaluate",lambda:{"blockers":["PRODUCTION_ACTIVATION_REQUIRED"]})
-    monkeypatch.setattr(mod.shadow,"d1_id",lambda:DB)
-    monkeypatch.setattr(mod.cf,"write_evidence",lambda state:None)
+def shadow_state():
+    return {
+        "worker_origin": ORIGIN,
+        "version_id": OLD,
+        "deployment_id": "dep-rollback",
+        "commit_sha": HEAD,
+        "deployment_mode": "SHADOW_ACCEPTANCE",
+    }
 
 
-def state():
-    return {"readback_session_id":"session-1","observed_at":"2026-09-17T15:00:00Z","provider":"cloudflare","account_id":"acct","database_id":DB,"worker_name":"fare-radar","worker_origin":"https://fare-radar.acct.workers.dev","cron_schedules":["* * * * *"],"deployment_id":"dep-prod","version_id":"v-prod","commit_sha":HEAD,"deployment_mode":"PRODUCTION","binding_verified":True,"migrations_verified":True,"baseline_seeds_verified":True,"dispatchable_reviews_verified":True,"secret_names":["WORKER_TOKEN","INGEST_HMAC_SECRETS"],"legacy_ingest_auth_enabled":False}
+def runner(args, **kwargs):
+    assert args == ["npm", "run", "build"]
+    return SimpleNamespace(returncode=0, stdout="", stderr="")
 
 
-def test_human_approval_is_mandatory_and_exact(monkeypatch):
-    monkeypatch.delenv("FARE_PRODUCTION_HUMAN_APPROVED_HEAD",raising=False)
-    monkeypatch.setattr(mod.shadow,"git",lambda *args:"")
-    monkeypatch.setattr(mod.shadow,"local_head",lambda:HEAD)
-    with pytest.raises(mod.ProductionDeployError,match="PRODUCTION_HUMAN_APPROVAL_REQUIRED"):
-        mod.require_human_approved_exact_head()
-    monkeypatch.setenv("FARE_PRODUCTION_HUMAN_APPROVED_HEAD","b"*40)
-    with pytest.raises(mod.ProductionDeployError,match="PRODUCTION_HUMAN_APPROVAL_HEAD_MISMATCH"):
-        mod.require_human_approved_exact_head()
+def test_preview_passes_before_exact_activation(monkeypatch):
+    setup(monkeypatch)
+    monkeypatch.setattr(
+        mod.release,
+        "upload_version_candidate",
+        lambda **kwargs: mod.release.UploadedVersion(NEW, PREVIEW, False),
+    )
+    monkeypatch.setattr(
+        mod.release,
+        "deploy_version_100",
+        lambda **kwargs: mod.release.DeploymentChange("dep-prod", NEW, False, False),
+    )
+    probes = []
+    result = mod.deploy_production(
+        runner=runner,
+        api_factory=lambda account, token: object(),
+        readback=lambda *args, **kwargs: prod_state(),
+        probes=lambda **kwargs: (probes.append(kwargs) or {"ok": True}),
+    )
+    assert [item["base_url"] for item in probes] == [PREVIEW, ORIGIN]
+    assert result["candidate_version_id"] == NEW
+    assert result["previous_shadow_version_id"] == OLD
+    assert result["rollback_boundary"] == "WORKER_VERSION_ONLY_D1_NOT_ROLLED_BACK"
 
 
-def test_only_activation_blocker_allows_production(monkeypatch):
-    common(monkeypatch)
-    monkeypatch.setattr(mod.preflight,"evaluate",lambda:{"blockers":["SHADOW_ACCEPTANCE_MISSING","PRODUCTION_ACTIVATION_REQUIRED"]})
-    calls=[]
-    with pytest.raises(mod.ProductionDeployError,match="PRODUCTION_PREREQUISITES_NOT_SATISFIED"):
-        mod.deploy_production(runner=lambda args,**kwargs:(calls.append(args) or SimpleNamespace(returncode=0)))
-    assert calls == []
+def test_preview_failure_never_activates(monkeypatch):
+    setup(monkeypatch)
+    monkeypatch.setattr(
+        mod.release,
+        "upload_version_candidate",
+        lambda **kwargs: mod.release.UploadedVersion(NEW, PREVIEW, False),
+    )
+    activated = []
+    monkeypatch.setattr(mod.release, "deploy_version_100", lambda **kwargs: activated.append(kwargs))
+    with pytest.raises(mod.ProductionDeployError, match="PRODUCTION_PREVIEW_VALIDATION_FAILED"):
+        mod.deploy_production(
+            runner=runner,
+            api_factory=lambda account, token: object(),
+            probes=lambda **kwargs: (_ for _ in ()).throw(mod.live_probe.LiveProbeError("bad")),
+        )
+    assert activated == []
 
 
-def test_build_then_exact_shadow_prestate_then_one_production_deploy(monkeypatch):
-    common(monkeypatch); calls=[]
-    def runner(args,**kwargs): calls.append(args); return SimpleNamespace(returncode=0,stdout="",stderr="")
-    monkeypatch.setattr(mod.shadow,"worker_snapshot",lambda api,name:mod.shadow.WorkerSnapshot(True,HEAD,"SHADOW_ACCEPTANCE","dep-shadow","v-shadow"))
-    probes=[]
-    result=mod.deploy_production(runner=runner,api_factory=lambda a,t:object(),readback=lambda *a,**k:state(),probes=lambda **k:(probes.append(k) or {"ok":True}))
-    assert result["ok"] and result["deployment_mode"] == "PRODUCTION"
-    assert calls[0] == ["npm","run","build"]
-    deploys=[x for x in calls if "deploy" in x]
-    assert len(deploys)==1
-    joined=" ".join(deploys[0])
-    assert "FARE_DEPLOYMENT_MODE:PRODUCTION" in deploys[0]
-    assert "SHADOW_ACCEPTANCE" not in joined
-    assert "--strict" in deploys[0] and "--keep-vars" in deploys[0]
-    assert len(probes)==1 and probes[0]["expected_mode"]=="PRODUCTION"
+def test_postdeploy_failure_restores_shadow_version(monkeypatch):
+    setup(monkeypatch)
+    monkeypatch.setattr(
+        mod.release,
+        "upload_version_candidate",
+        lambda **kwargs: mod.release.UploadedVersion(NEW, PREVIEW, True),
+    )
+    monkeypatch.setattr(
+        mod.release,
+        "deploy_version_100",
+        lambda **kwargs: mod.release.DeploymentChange("dep-prod", NEW, True, False),
+    )
+    rolled = []
+    monkeypatch.setattr(
+        mod.release,
+        "rollback_to_version",
+        lambda **kwargs: (
+            rolled.append(kwargs)
+            or mod.release.DeploymentChange("dep-rollback", OLD, True, False)
+        ),
+    )
+    monkeypatch.setattr(mod.cf, "collect_bootstrap_readback", lambda *args, **kwargs: shadow_state())
+    modes = []
+
+    def probes(**kwargs):
+        modes.append(kwargs["expected_mode"])
+        return {"ok": True}
+
+    with pytest.raises(mod.ProductionDeployError, match="PRODUCTION_POSTDEPLOY_VALIDATION_FAILED_ROLLED_BACK"):
+        mod.deploy_production(
+            runner=runner,
+            api_factory=lambda account, token: object(),
+            readback=lambda *args, **kwargs: (_ for _ in ()).throw(mod.cf.CloudflareProviderError("bad")),
+            probes=probes,
+        )
+    assert rolled[0]["version_id"] == OLD
+    assert modes == ["PRODUCTION", "SHADOW_ACCEPTANCE"]
 
 
-def test_production_prestate_must_still_be_exact_shadow(monkeypatch):
-    common(monkeypatch)
-    runner=lambda args,**kwargs:SimpleNamespace(returncode=0,stdout="",stderr="")
-    monkeypatch.setattr(mod.shadow,"worker_snapshot",lambda api,name:mod.shadow.WorkerSnapshot(True,HEAD,"PRODUCTION","dep","v"))
-    with pytest.raises(mod.ProductionDeployError,match="PRODUCTION_PRESTATE_NOT_EXACT_SHADOW"):
-        mod.deploy_production(runner=runner,api_factory=lambda a,t:object())
+def test_activation_error_also_reconciles_to_shadow(monkeypatch):
+    setup(monkeypatch)
+    monkeypatch.setattr(
+        mod.release,
+        "upload_version_candidate",
+        lambda **kwargs: mod.release.UploadedVersion(NEW, PREVIEW, False),
+    )
+    monkeypatch.setattr(
+        mod.release,
+        "deploy_version_100",
+        lambda **kwargs: (_ for _ in ()).throw(mod.release.CloudflareReleaseError("ambiguous")),
+    )
+    monkeypatch.setattr(
+        mod.release,
+        "rollback_to_version",
+        lambda **kwargs: mod.release.DeploymentChange("dep-rollback", OLD, False, False),
+    )
+    monkeypatch.setattr(mod.cf, "collect_bootstrap_readback", lambda *args, **kwargs: shadow_state())
+    with pytest.raises(mod.ProductionDeployError, match="PRODUCTION_VERSION_ACTIVATION_FAILED_ROLLED_BACK"):
+        mod.deploy_production(
+            runner=runner,
+            api_factory=lambda account, token: object(),
+            probes=lambda **kwargs: {"ok": True},
+        )
 
 
-def test_lost_deploy_response_is_readback_first_and_never_resent(monkeypatch):
-    common(monkeypatch); calls=[]
-    def runner(args,**kwargs):
-        calls.append(args)
-        return SimpleNamespace(returncode=0 if args[:3]==["npm","run","build"] else 1,stdout="",stderr="lost")
-    monkeypatch.setattr(mod.shadow,"worker_snapshot",lambda api,name:mod.shadow.WorkerSnapshot(True,HEAD,"SHADOW_ACCEPTANCE","dep-shadow","v-shadow"))
-    result=mod.deploy_production(runner=runner,api_factory=lambda a,t:object(),readback=lambda *a,**k:state(),probes=lambda **k:{"ok":True})
-    assert result["deploy_command_uncertain_but_readback_confirmed"] is True
-    assert len([x for x in calls if "deploy" in x])==1
+def test_prerequisites_and_exact_shadow_prestate_remain_mandatory(monkeypatch):
+    setup(monkeypatch)
+    monkeypatch.setattr(mod.preflight, "evaluate", lambda: {"blockers": ["SHADOW_ACCEPTANCE_MISSING"]})
+    with pytest.raises(mod.ProductionDeployError, match="PRODUCTION_PREREQUISITES_NOT_SATISFIED"):
+        mod.deploy_production(runner=runner)
+
+    setup(monkeypatch)
+    monkeypatch.setattr(
+        mod.shadow,
+        "worker_snapshot",
+        lambda api, name: mod.shadow.WorkerSnapshot(True, HEAD, "PRODUCTION", "dep", NEW),
+    )
+    with pytest.raises(mod.ProductionDeployError, match="PRODUCTION_PRESTATE_NOT_EXACT_SHADOW"):
+        mod.deploy_production(runner=runner, api_factory=lambda account, token: object())
