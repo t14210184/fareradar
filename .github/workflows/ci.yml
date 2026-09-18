@@ -53,3 +53,23 @@ jobs:
           path: ${{ runner.temp }}/fare-release-manifest/release-evidence-manifest.json
           if-no-files-found: error
           retention-days: 90
+
+
+  attest-evidence:
+    if: github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download compact release evidence manifest
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: release-evidence-manifest-${{ github.sha }}
+          path: ${{ runner.temp }}/fare-release-manifest
+      - name: Attest release evidence provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: ${{ runner.temp }}/fare-release-manifest/release-evidence-manifest.json
