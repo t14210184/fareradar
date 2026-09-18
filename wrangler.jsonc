@@ -3,9 +3,22 @@
   "main": "dist/worker.js",
   "compatibility_date": "2026-09-15",
   "preview_urls": true,
-  "triggers": { "crons": ["* * * * *"] },
-  "secrets": ["WORKER_TOKEN", "INGEST_HMAC_SECRETS"],
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "secrets": {
+    "required": [
+      "WORKER_TOKEN",
+      "INGEST_HMAC_SECRETS"
+    ]
+  },
   "d1_databases": [
-    { "binding": "DB", "database_name": "fare-radar-production", "database_id": "REPLACE_WITH_D1_DATABASE_ID" }
+    {
+      "binding": "DB",
+      "database_name": "fare-radar-production",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+    }
   ]
 }
