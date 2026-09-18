@@ -48,7 +48,7 @@ def test_ci_wrangler_uses_synthetic_d1_but_production_stays_fail_closed():
     prod = json.loads((ROOT / "wrangler.jsonc").read_text())
     assert ci["triggers"]["crons"] == ["* * * * *"]
     assert prod["triggers"]["crons"] == ["* * * * *"]
-    assert prod["secrets"] == ["WORKER_TOKEN", "INGEST_HMAC_SECRETS"]
+    assert prod["secrets"] == {"required": ["WORKER_TOKEN", "INGEST_HMAC_SECRETS"]}
     assert ci["d1_databases"][0]["database_id"] == "00000000-0000-0000-0000-000000000001"
     assert prod["d1_databases"][0]["database_id"] == "REPLACE_WITH_D1_DATABASE_ID"
     assert ci["d1_databases"][0]["database_id"] != prod["d1_databases"][0]["database_id"]
