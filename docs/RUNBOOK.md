@@ -65,13 +65,27 @@ The provisioner:
 1. verifies the clean exact local HEAD and current exact-head GitHub CI;
 2. runs local pre-push acceptance before provider mutation;
 3. creates or reuses exactly one `fare-radar-production` D1 database;
-4. verifies migration history is a valid prefix, then applies missing migrations with readback;
+4. verifies migration history is a valid prefix, rejects destructive same-release migrations, captures a D1 Time Travel bookmark, writes the before/pending recovery manifest, then applies missing migrations once and reconciles the provider migration table by readback;
 5. applies baseline source/provider seeds with readback;
 6. replaces the public-repo D1 placeholder only in the release commit;
 7. regenerates exact-head Gate evidence;
 8. pushes a bounded `shadow-release-<head>` branch and waits for exact-head CI.
 
 The public baseline may keep `REPLACE_WITH_D1_DATABASE_ID`; the release commit is the authoritative bridge to the real D1 identity.
+
+### D1 recovery boundary
+
+A Production migration must be expand-only. The provisioning path fails closed on `DROP TABLE`, `DROP COLUMN`, and table/column rename operations. Destructive cleanup belongs to a separate post-cutover release after the old Worker no longer depends on the old schema.
+
+Before a pending migration is dispatched, the provisioner reads the current D1 Time Travel bookmark and writes `d1-migration-recovery.json` with the target database, before-state, pending list, and bookmark. If the migration command response is lost, it reads `d1_migrations` and provider state before deciding whether the migration applied; it never blindly reapplies an uncertain migration.
+
+Worker rollback never restores D1. Emergency D1 restore is a separate human-reserved operation. Read-only planning is the default:
+
+```bash
+npm run d1:restore -- --bookmark <BOOKMARK>
+```
+
+Execution additionally requires `--execute` and an exact `FARE_D1_RESTORE_HUMAN_APPROVED_BOOKMARK` matching the requested bookmark. The tool re-reads the target D1 identity and current bookmark before dispatch. Automation must not create or infer this approval.
 
 ## 5. Shadow Worker deployment
 
