@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import pathlib
 import sys
@@ -41,6 +42,18 @@ def common(monkeypatch):
     monkeypatch.setattr(mod.preflight, "code_ready", lambda head: True)
     monkeypatch.setattr(mod, "d1_id", lambda: DB)
     monkeypatch.setattr(mod.cf, "write_bootstrap_evidence", lambda state: None)
+    monkeypatch.setattr(mod.credentials, "load_config", lambda values: object())
+    monkeypatch.setattr(
+        mod.credentials,
+        "ensure_reviewer_auth_keys",
+        lambda api, database_id, config: {"shadow-key": "EXACT_EXISTING", "access-key": "EXACT_EXISTING"},
+    )
+
+    @contextlib.contextmanager
+    def fake_secret_file(config):
+        yield pathlib.Path("/tmp/fare-radar-test-secrets.json")
+
+    monkeypatch.setattr(mod.credentials, "secret_file", fake_secret_file)
 
 
 def state(head=HEAD, version=NEW):
@@ -78,6 +91,7 @@ def test_first_worker_bootstrap_keeps_one_coupled_deploy(monkeypatch):
     assert result["deploy_strategy"] == "INITIAL_BOOTSTRAP"
     assert len(deploys) == 1
     assert "versions" not in deploys[0]
+    assert "--secrets-file" in deploys[0]
 
 
 def test_existing_shadow_uses_preview_then_exact_version_activation(monkeypatch):
