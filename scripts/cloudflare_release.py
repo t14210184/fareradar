@@ -198,8 +198,8 @@ def rollback_to_version(
 ) -> DeploymentChange:
     try:
         before_deployment, before_version = active_single_version(api, worker_name)
-    except CloudflareReleaseError as exc:
-        raise CloudflareReleaseError("WORKER_ROLLBACK_PRESTATE_AMBIGUOUS") from exc
+    except CloudflareReleaseError:
+        before_deployment, before_version = "", ""
     if before_version == version_id:
         return DeploymentChange(before_deployment, version_id, False, True)
     command = [
@@ -225,6 +225,4 @@ def rollback_to_version(
         raise CloudflareReleaseError("WORKER_ROLLBACK_PARTIAL_OR_AMBIGUOUS") from exc
     if after_version == version_id:
         return DeploymentChange(after_deployment, version_id, uncertain, False)
-    if after_version == before_version:
-        raise CloudflareReleaseError("WORKER_ROLLBACK_NOT_APPLIED")
     raise CloudflareReleaseError("WORKER_ROLLBACK_PARTIAL_OR_AMBIGUOUS")
