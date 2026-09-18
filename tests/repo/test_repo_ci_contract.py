@@ -11,6 +11,8 @@ CHECKOUT_SHA = "11d5960a326750d5838078e36cf38b85af677262"
 SETUP_NODE_SHA = "49933ea5288caeca8642d1e84afbd3f7d6820020"
 SETUP_PYTHON_SHA = "a26af69be951a213d495a4c3e4e4022e16d87065"
 UPLOAD_ARTIFACT_SHA = "ea165f8d65b6e75b540449e92b4886f43607fa02"
+DEPENDENCY_REVIEW_SHA = "2031cfc080254a8a887f58cffee85186f0e49e48"
+CODEQL_SHA = "faaca9a8f6edddba5725ffe5adefdab6669a2eca"
 
 
 def load_prepush():
@@ -99,12 +101,41 @@ def test_worker_preview_urls_are_explicit():
     assert prod["preview_urls"] is True
 
 
-def test_gate_evidence_is_part_of_required_ci_and_artifact_is_pinned():
+def test_gate_evidence_is_part_of_required_ci_and_retained_for_90_days():
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     pkg = json.loads((ROOT / "package.json").read_text())
     assert pkg["scripts"]["gates:all"] == "python3 scripts/run_gate_evidence.py"
+    assert pkg["scripts"]["evidence:manifest"] == "python3 scripts/release_evidence_manifest.py"
     assert "npm run gates:all" in ci
     assert 'export FARE_EVIDENCE_ROOT="$RUNNER_TEMP/fare-evidence"' in ci
-    assert f"actions/upload-artifact@{UPLOAD_ARTIFACT_SHA}" in ci
+    assert ci.count(f"actions/upload-artifact@{UPLOAD_ARTIFACT_SHA}") == 2
     assert "actions/upload-artifact@v4" not in ci
     assert "gate-evidence-${{ github.sha }}" in ci
+    assert "release-evidence-manifest-${{ github.sha }}" in ci
+    assert ci.count("retention-days: 90") == 2
+    assert "python3 scripts/release_evidence_manifest.py" in ci
+    assert "artifact-digest" in ci
+    assert "artifact-id" in ci
+
+
+def test_dependency_security_automation_is_present_and_sha_pinned():
+    dependabot = (ROOT / ".github/dependabot.yml").read_text()
+    assert "package-ecosystem: github-actions" in dependabot
+    assert "package-ecosystem: npm" in dependabot
+    assert "package-ecosystem: pip" in dependabot
+
+    review = (ROOT / ".github/workflows/dependency-review.yml").read_text()
+    assert "pull_request:" in review
+    assert "permissions:\n  contents: read\n" in review
+    assert f"actions/dependency-review-action@{DEPENDENCY_REVIEW_SHA}" in review
+    assert "actions/dependency-review-action@v4" not in review
+    assert "fail-on-severity: high" in review
+
+
+def test_codeql_is_advisory_and_sha_pinned():
+    codeql = (ROOT / ".github/workflows/codeql.yml").read_text()
+    assert "continue-on-error: true" in codeql
+    assert f"github/codeql-action/init@{CODEQL_SHA}" in codeql
+    assert f"github/codeql-action/analyze@{CODEQL_SHA}" in codeql
+    assert "github/codeql-action/init@v3" not in codeql
+    assert "security-events: write" in codeql
