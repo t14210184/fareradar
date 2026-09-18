@@ -57,3 +57,26 @@ def test_cloudflare_provider_evidence_cannot_be_spliced_across_sessions():
     d['readback_session_id']='two'
     assert not pf.cloudflare_session_ok(a,b,c,d)
     assert not pf.cloudflare_session_ok({},b,c,d)
+
+def test_blocker_manifest_covers_every_preflight_code_and_preserves_order(monkeypatch):
+    expected={
+        'LOCAL_CODE_GATES_NOT_READY','GITHUB_REMOTE_MISSING','GITHUB_PROVIDER_READBACK_MISSING',
+        'D1_DATABASE_ID_MISSING','LEGACY_INGEST_AUTH_ENABLED','CLOUDFLARE_READBACK_SESSION_MISMATCH',
+        'CLOUDFLARE_AUTH_READBACK_MISSING','D1_PROVIDER_READBACK_MISSING','WORKER_DEPLOY_READBACK_MISSING',
+        'PRODUCTION_SECRETS_READBACK_MISSING','SHADOW_ACCEPTANCE_MISSING','PRODUCTION_ACTIVATION_REQUIRED'
+    }
+    assert set(pf.BLOCKER_MANIFEST)==expected
+    got=pf.evaluate(remote='https://github.com/acme/fare-radar.git')
+    assert [item['code'] for item in got['blocker_details']]==got['blockers']
+    assert got['production_ready'] is (not got['blockers'])
+    assert all(item['domain'] and item['authority'] and item['next_action'] for item in got['blocker_details'])
+    provider=[item for item in got['blocker_details'] if item['provider']]
+    assert all(item['requires_provider'] is True for item in provider)
+
+def test_unknown_blocker_cannot_silently_escape_manifest():
+    try:
+        pf.blocker_details(['NEW_UNMAPPED_GATE'])
+    except RuntimeError as exc:
+        assert str(exc)=='BLOCKER_MANIFEST_MISSING:NEW_UNMAPPED_GATE'
+    else:
+        raise AssertionError('unmapped blocker was accepted')
