@@ -182,6 +182,32 @@ def auth_ok(data):
     return bool(data and data.get("provider") == "cloudflare" and data.get("auth_verified") is True and evidence_recent(data, 24))
 
 
+def credential_policy_ok(data):
+    worker = data.get("worker_deploy") or {} if data else {}
+    d1 = data.get("d1_admin") or {} if data else {}
+    bootstrap = data.get("bootstrap") or {} if data else {}
+    fingerprint_re = r"[0-9a-f]{64}"
+    return bool(
+        data
+        and data.get("provider") == "cloudflare"
+        and data.get("credential_policy_verified") is True
+        and data.get("secret_material_present") is False
+        and evidence_recent(data, 24)
+        and bootstrap.get("active") is False
+        and worker.get("token_kind") == "ACCOUNT_OWNED_API_TOKEN"
+        and worker.get("scope_type") == "INDIVIDUAL_WORKER"
+        and worker.get("resource_name") == "fare-radar"
+        and worker.get("role") == "EDITOR"
+        and worker.get("can_delete") is False
+        and bool(re.fullmatch(fingerprint_re, str(worker.get("token_id_sha256") or "")))
+        and d1.get("token_kind") == "ACCOUNT_OWNED_API_TOKEN"
+        and d1.get("product") == "D1"
+        and d1.get("role") in {"EDITOR", "READ_WRITE"}
+        and d1.get("resource_name") == "fare-radar-production"
+        and bool(re.fullmatch(fingerprint_re, str(d1.get("token_id_sha256") or "")))
+    )
+
+
 def d1_readback_ok(data, head):
     return bool(
         data
@@ -271,10 +297,13 @@ def evaluate(remote=None):
     d1 = provider_evidence("d1-readback") or {}
     deploy = provider_evidence("worker-deploy") or {}
     secrets = provider_evidence("production-secrets") or {}
-    if not cloudflare_session_ok(auth, d1, deploy, secrets):
+    credentials = provider_evidence("cloudflare-credential-policy") or {}
+    if not cloudflare_session_ok(auth, d1, deploy, secrets, credentials):
         blockers.append("CLOUDFLARE_READBACK_SESSION_MISMATCH")
     if not auth_ok(auth):
         blockers.append("CLOUDFLARE_AUTH_READBACK_MISSING")
+    if not credential_policy_ok(credentials):
+        blockers.append("CLOUDFLARE_CREDENTIAL_SCOPE_EVIDENCE_MISSING")
     if not d1_readback_ok(d1, head):
         blockers.append("D1_PROVIDER_READBACK_MISSING")
     if not deploy_ok(deploy, head):
