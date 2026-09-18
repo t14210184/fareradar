@@ -3,7 +3,15 @@ import argparse,datetime as dt,hashlib,json,os,pathlib,re,subprocess
 from concurrent.futures import ThreadPoolExecutor
 
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-OUT=ROOT/'evidence'; OUT.mkdir(exist_ok=True)
+
+def evidence_root()->pathlib.Path:
+    raw=os.environ.get('FARE_EVIDENCE_ROOT','')
+    if not raw:return ROOT/'evidence'
+    path=pathlib.Path(raw).expanduser()
+    if not path.is_absolute():raise RuntimeError('FARE_EVIDENCE_ROOT_MUST_BE_ABSOLUTE')
+    return path
+
+OUT=evidence_root(); OUT.mkdir(parents=True,exist_ok=True)
 SPEC=ROOT/'docs/SPEC_v1.3.md'
 GATE_STAGE_SIZE=8
 SUITE_STAGE_COUNT=5
