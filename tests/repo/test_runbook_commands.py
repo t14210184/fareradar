@@ -61,3 +61,13 @@ def test_documented_release_commands_exist_and_plan_is_read_only():
         "UPLOAD_ZERO_TRAFFIC_PRODUCTION_VERSION_AND_PREVIEW_PROBE",
         "ACTIVATE_EXACT_VERSION_100_PERCENT_AND_POST_READBACK_OR_ROLLBACK",
     ]
+
+
+def test_readme_and_contributing_use_current_release_entrypoints():
+    readme = (ROOT / "README.md").read_text()
+    contributing = (ROOT / "CONTRIBUTING.md").read_text()
+    assert "npm run gates:all" in readme
+    assert "npm run check:prepush" in readme
+    assert "python scripts/run_gate_evidence.py" not in readme
+    assert "npm run gates:all" in contributing
+    assert "same-source readback" in contributing
