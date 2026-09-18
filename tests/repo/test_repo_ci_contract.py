@@ -13,6 +13,8 @@ SETUP_PYTHON_SHA = "a26af69be951a213d495a4c3e4e4022e16d87065"
 UPLOAD_ARTIFACT_SHA = "ea165f8d65b6e75b540449e92b4886f43607fa02"
 DEPENDENCY_REVIEW_SHA = "2031cfc080254a8a887f58cffee85186f0e49e48"
 CODEQL_SHA = "faaca9a8f6edddba5725ffe5adefdab6669a2eca"
+DOWNLOAD_ARTIFACT_SHA = "634f93cb2916e3fdff6788551b99b062d0335ce0"
+ATTEST_PROVENANCE_SHA = "977bb373ede98d70efdf65b84cb5f73e068dcc2a"
 
 
 def load_prepush():
@@ -139,3 +141,17 @@ def test_codeql_is_advisory_and_sha_pinned():
     assert f"github/codeql-action/analyze@{CODEQL_SHA}" in codeql
     assert "github/codeql-action/init@v3" not in codeql
     assert "security-events: write" in codeql
+
+
+def test_release_evidence_attestation_is_separate_least_privilege_job():
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "attest-evidence:" in ci
+    assert "if: github.event_name == 'push'" in ci
+    assert "needs: test" in ci
+    assert "id-token: write" in ci
+    assert "attestations: write" in ci
+    assert f"actions/download-artifact@{DOWNLOAD_ARTIFACT_SHA}" in ci
+    assert f"actions/attest-build-provenance@{ATTEST_PROVENANCE_SHA}" in ci
+    assert "actions/download-artifact@v5" not in ci
+    assert "actions/attest-build-provenance@v3" not in ci
+    assert "release-evidence-manifest-${{ github.sha }}" in ci
