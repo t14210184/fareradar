@@ -33,11 +33,14 @@ class CfApi:
         self.migrations: list[str] = []
         self.sources: set[str] = set()
         self.providers: set[str] = set()
+        self.bookmark = "00000006-00000002-00004e2f-0a83ea2fceebc654"
     def get(self, path):
         if path.startswith("/d1/database?"):
             return envelope(list(self.databases))
         if path == f"/d1/database/{DB}":
             return envelope({"uuid": DB, "name": mod.DB_NAME})
+        if path == f"/d1/database/{DB}/time_travel/bookmark":
+            return envelope({"bookmark": self.bookmark})
         raise AssertionError(path)
     def post(self, path, payload):
         if path == "/d1/database":
@@ -108,18 +111,25 @@ def test_d1_rejected_create_with_absent_readback_is_not_resent():
     assert api.create_calls == 1
 
 
-def test_migration_lost_response_accepts_exact_provider_readback(tmp_path):
+def test_migration_lost_response_accepts_exact_provider_readback(tmp_path, monkeypatch):
     api = CfApi(); expected = mod.cf._migration_names(); config = tmp_path / "wrangler.jsonc"; config.write_text("{}")
+    captured=[]
+    monkeypatch.setattr(mod.d1r, "write_manifest", lambda doc: captured.append(dict(doc)))
     calls=[]
     def runner(args, **kwargs):
         calls.append(args); api.migrations = list(expected); return SimpleNamespace(returncode=1, stdout="", stderr="lost")
     result = mod.ensure_migrations(api, DB, config, runner=runner)
     assert result == "readback_confirmed"
     assert len(calls) == 1
+    assert captured[0]["pre_migration_bookmark"] == api.bookmark
+    assert captured[0]["before_migrations"] == []
+    assert captured[0]["pending_migrations"] == expected
+    assert captured[-1]["after_migrations"] == expected
 
 
-def test_migration_partial_state_is_ambiguous_not_retried(tmp_path):
+def test_migration_partial_state_is_ambiguous_not_retried(tmp_path, monkeypatch):
     api = CfApi(); expected = mod.cf._migration_names(); config = tmp_path / "wrangler.jsonc"; config.write_text("{}")
+    monkeypatch.setattr(mod.d1r, "write_manifest", lambda doc: None)
     def runner(args, **kwargs):
         api.migrations = list(expected[:2]); return SimpleNamespace(returncode=1, stdout="", stderr="partial")
     with pytest.raises(mod.ShadowProvisionError, match="D1_MIGRATIONS_PARTIAL_OR_AMBIGUOUS"):
@@ -157,3 +167,12 @@ def test_wait_exact_ci_rejects_failed_terminal_run():
     api.runs = [{"id": 9, "run_number": 4, "head_sha": release, "head_branch": branch, "path": ".github/workflows/ci.yml", "status": "completed", "conclusion": "failure"}]
     with pytest.raises(mod.ShadowProvisionError, match="GITHUB_RELEASE_EXACT_HEAD_CI_FAILED"):
         mod.wait_exact_ci(api, release, branch, timeout_seconds=1, sleep=lambda _: None)
+
+
+def test_destructive_migration_gate_stops_before_dispatch(tmp_path, monkeypatch):
+    api = CfApi(); config = tmp_path / "wrangler.jsonc"; config.write_text("{}")
+    monkeypatch.setattr(mod.d1r, "require_expand_only", lambda pending: (_ for _ in ()).throw(mod.d1r.D1RecoveryError("D1_DESTRUCTIVE_MIGRATION_BLOCKED:test.sql")))
+    called = []
+    with pytest.raises(mod.ShadowProvisionError, match="D1_DESTRUCTIVE_MIGRATION_BLOCKED"):
+        mod.ensure_migrations(api, DB, config, runner=lambda *args, **kwargs: called.append(args))
+    assert called == []
