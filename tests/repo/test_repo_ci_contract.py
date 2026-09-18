@@ -104,7 +104,7 @@ def test_gate_evidence_is_part_of_required_ci_and_artifact_is_pinned():
     pkg = json.loads((ROOT / "package.json").read_text())
     assert pkg["scripts"]["gates:all"] == "python3 scripts/run_gate_evidence.py"
     assert "npm run gates:all" in ci
-    assert "FARE_EVIDENCE_ROOT: ${{ runner.temp }}/fare-evidence" in ci
+    assert 'export FARE_EVIDENCE_ROOT="$RUNNER_TEMP/fare-evidence"' in ci
     assert f"actions/upload-artifact@{UPLOAD_ARTIFACT_SHA}" in ci
     assert "actions/upload-artifact@v4" not in ci
     assert "gate-evidence-${{ github.sha }}" in ci
