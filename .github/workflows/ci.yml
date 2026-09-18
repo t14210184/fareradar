@@ -7,6 +7,8 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      FARE_EVIDENCE_ROOT: ${{ runner.temp }}/fare-evidence
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -23,3 +25,11 @@ jobs:
       - run: npm run check:wrangler
       - run: pytest -q
       - run: python3 scripts/validate_invariants.py
+      - run: npm run gates:all
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gate-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/fare-evidence/
+          if-no-files-found: warn
+          retention-days: 14
