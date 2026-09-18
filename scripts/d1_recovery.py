@@ -38,9 +38,12 @@ def pending_migration_names(current: list[str], expected: list[str]) -> list[str
     return expected[len(current):]
 
 
-def migration_is_destructive(path: pathlib.Path) -> bool:
-    text = path.read_text(encoding="utf-8")
+def sql_is_destructive(text: str) -> bool:
     return any(pattern.search(text) for pattern in DESTRUCTIVE_PATTERNS)
+
+
+def migration_is_destructive(path: pathlib.Path) -> bool:
+    return sql_is_destructive(path.read_text(encoding="utf-8"))
 
 
 def require_expand_only(pending: list[str]) -> None:
