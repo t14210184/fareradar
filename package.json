@@ -25,7 +25,8 @@
     "provision:shadow": "python3 scripts/provision_shadow.py",
     "deploy:shadow": "python3 scripts/deploy_shadow.py",
     "deploy:production": "python3 scripts/deploy_production.py",
-    "gates:all": "python3 scripts/run_gate_evidence.py"
+    "gates:all": "python3 scripts/run_gate_evidence.py",
+    "evidence:manifest": "python3 scripts/release_evidence_manifest.py"
   },
   "devDependencies": {
     "typescript": "5.8.3"
