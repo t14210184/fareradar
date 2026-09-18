@@ -91,3 +91,8 @@ def test_prepush_rejects_bare_placeholder_but_allows_d1_sentinel():
 def test_github_protection_command_is_wired():
     pkg = json.loads((ROOT / "package.json").read_text())
     assert pkg["scripts"]["protect:github"] == "python3 scripts/github_provider.py protect"
+
+
+def test_worker_preview_urls_are_explicit():
+    prod = json.loads((ROOT / "wrangler.jsonc").read_text())
+    assert prod["preview_urls"] is True
