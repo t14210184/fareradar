@@ -29,6 +29,7 @@ def plan():
         "production_ready": state["production_ready"],
         "commit_sha": state["commit_sha"],
         "blockers": state["blockers"],
+        "blocker_details": state["blocker_details"],
         "ordered_shared_steps": ORDERED_SHARED_STEPS,
     }
 
