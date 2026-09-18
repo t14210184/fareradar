@@ -27,10 +27,29 @@ jobs:
         run: |
           export FARE_EVIDENCE_ROOT="$RUNNER_TEMP/fare-evidence"
           npm run gates:all
-      - if: always()
+      - name: Upload Gate evidence
+        id: gate_upload
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: gate-evidence-${{ github.sha }}
           path: ${{ runner.temp }}/fare-evidence/
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 90
+      - name: Build compact release evidence manifest
+        if: success()
+        env:
+          FARE_EVIDENCE_ROOT: ${{ runner.temp }}/fare-evidence
+          FARE_MANIFEST_ROOT: ${{ runner.temp }}/fare-release-manifest
+          GATE_ARTIFACT_ID: ${{ steps.gate_upload.outputs.artifact-id }}
+          GATE_ARTIFACT_DIGEST: ${{ steps.gate_upload.outputs.artifact-digest }}
+          GATE_ARTIFACT_URL: ${{ steps.gate_upload.outputs.artifact-url }}
+        run: python3 scripts/release_evidence_manifest.py
+      - name: Upload compact release evidence manifest
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-evidence-manifest-${{ github.sha }}
+          path: ${{ runner.temp }}/fare-release-manifest/release-evidence-manifest.json
+          if-no-files-found: error
+          retention-days: 90
