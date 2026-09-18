@@ -57,3 +57,43 @@ def test_cloudflare_provider_evidence_cannot_be_spliced_across_sessions():
     d['readback_session_id']='two'
     assert not pf.cloudflare_session_ok(a,b,c,d)
     assert not pf.cloudflare_session_ok({},b,c,d)
+
+
+def test_cloudflare_least_privilege_credential_evidence_contract(monkeypatch):
+    monkeypatch.setattr(pf,'evidence_recent',lambda data,max_hours=24,now=None: True)
+    good={
+        'provider':'cloudflare',
+        'credential_policy_verified':True,
+        'secret_material_present':False,
+        'observed_at':'2026-09-18T01:00:00Z',
+        'worker_deploy':{
+            'token_kind':'ACCOUNT_OWNED_API_TOKEN',
+            'scope_type':'INDIVIDUAL_WORKER',
+            'resource_name':'fare-radar',
+            'role':'EDITOR',
+            'can_delete':False,
+            'token_id_sha256':'a'*64,
+        },
+        'd1_admin':{
+            'token_kind':'ACCOUNT_OWNED_API_TOKEN',
+            'product':'D1',
+            'resource_name':'fare-radar-production',
+            'role':'EDITOR',
+            'token_id_sha256':'b'*64,
+        },
+        'bootstrap':{'active':False},
+    }
+    assert pf.credential_policy_ok(good)
+    bad={**good,'worker_deploy':{**good['worker_deploy'],'role':'ADMIN','can_delete':True}}
+    assert not pf.credential_policy_ok(bad)
+    bad={**good,'bootstrap':{'active':True}}
+    assert not pf.credential_policy_ok(bad)
+    bad={**good,'secret_material_present':True}
+    assert not pf.credential_policy_ok(bad)
+
+
+def test_local_cloudflare_tokens_cannot_satisfy_scope_evidence(monkeypatch):
+    monkeypatch.setenv('CLOUDFLARE_API_TOKEN','local-secret')
+    monkeypatch.setattr(pf,'provider_evidence',lambda name: {})
+    got=pf.evaluate(remote='https://github.com/acme/fare-radar.git')
+    assert 'CLOUDFLARE_CREDENTIAL_SCOPE_EVIDENCE_MISSING' in got['blockers']
