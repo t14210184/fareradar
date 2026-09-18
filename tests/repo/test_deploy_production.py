@@ -194,3 +194,10 @@ def test_prerequisites_and_exact_shadow_prestate_remain_mandatory(monkeypatch):
     )
     with pytest.raises(mod.ProductionDeployError, match="PRODUCTION_PRESTATE_NOT_EXACT_SHADOW"):
         mod.deploy_production(runner=runner, api_factory=lambda account, token: object())
+
+
+def test_worker_rollback_never_invokes_d1_time_travel_restore():
+    source = (ROOT / "scripts" / "deploy_production.py").read_text()
+    assert "time_travel/restore" not in source
+    assert "d1_restore" not in source
+    assert "WORKER_VERSION_ONLY_D1_NOT_ROLLED_BACK" in source
