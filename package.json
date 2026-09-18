@@ -24,7 +24,8 @@
     "probe:live": "python3 scripts/live_probe.py",
     "provision:shadow": "python3 scripts/provision_shadow.py",
     "deploy:shadow": "python3 scripts/deploy_shadow.py",
-    "deploy:production": "python3 scripts/deploy_production.py"
+    "deploy:production": "python3 scripts/deploy_production.py",
+    "gates:all": "python3 scripts/run_gate_evidence.py"
   },
   "devDependencies": {
     "typescript": "5.8.3"
