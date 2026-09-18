@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 import cloudflare_provider as cf
+import d1_recovery as d1r
 import github_provider as gh
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -125,6 +126,19 @@ def ensure_migrations(api: Any, database_id: str, config_path: pathlib.Path, *, 
     _require_prefix(before, expected)
     if before == expected:
         return "already_applied"
+    pending = d1r.pending_migration_names(before, expected)
+    try:
+        d1r.require_expand_only(pending)
+        bookmark = d1r.current_bookmark(api, database_id)
+    except d1r.D1RecoveryError as exc:
+        raise ShadowProvisionError(str(exc)) from exc
+    recovery_doc = d1r.recovery_manifest(
+        database_id=database_id,
+        before=before,
+        pending=pending,
+        bookmark=bookmark,
+    )
+    d1r.write_manifest(recovery_doc)
     command = ["npx", "--yes", WRANGLER, "d1", "migrations", "apply", DB_NAME, "--remote", "--config", str(config_path)]
     uncertain = False
     try:
@@ -133,6 +147,8 @@ def ensure_migrations(api: Any, database_id: str, config_path: pathlib.Path, *, 
     except subprocess.TimeoutExpired:
         uncertain = True
     after = migration_state(api, database_id)
+    recovery_doc["after_migrations"] = after
+    d1r.write_manifest(recovery_doc)
     if after == expected:
         return "readback_confirmed" if uncertain else "applied"
     if after == before:
