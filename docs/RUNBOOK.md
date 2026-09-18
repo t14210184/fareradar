@@ -125,7 +125,7 @@ npm run readback:cloudflare
 npm run probe:live
 ```
 
-A valid full readback must prove one same-source session across account identity, D1 identity/binding, Worker settings, active deployment, secrets, cron schedules, migrations, baseline seeds, and dispatchable source/provider human-review evidence.
+A valid full readback must prove one same-source session across account identity, D1 identity/binding, Worker settings, active deployment, secrets, cron schedules, migrations, baseline seeds, dispatchable source/provider human-review evidence, and Cloudflare credential-scope evidence.
 
 The Worker must have:
 - exactly one active version at 100%;
@@ -135,7 +135,11 @@ The Worker must have:
 - exactly one `* * * * *` cron;
 - required `WORKER_TOKEN` and `INGEST_HMAC_SECRETS`;
 - legacy ingest auth disabled and legacy secret absent;
-- workers.dev origin enabled.
+- workers.dev origin enabled;
+- bootstrap credential inactive;
+- steady-state Worker deployment token is account-owned, scoped to the individual `fare-radar` Worker, role `Editor`, and cannot delete the Worker;
+- D1 administration credential is limited to `fare-radar-production` D1 duties;
+- credential evidence contains token-ID fingerprints only, never token secrets.
 
 Evidence from different readback sessions cannot be spliced into a Production PASS.
 
