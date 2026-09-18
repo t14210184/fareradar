@@ -115,6 +115,7 @@ def upload_version_candidate(
     mode: str,
     config_path: str = "wrangler.jsonc",
     alias_prefix: str = "candidate",
+    secrets_file: pathlib.Path | None = None,
 ) -> UploadedVersion:
     before = version_ids(api, worker_name)
     alias = f"{alias_prefix}-{head[:12]}".lower()
@@ -138,6 +139,8 @@ def upload_version_candidate(
         "--var",
         f"FARE_DEPLOYMENT_MODE:{mode}",
     ]
+    if secrets_file is not None:
+        command.extend(["--secrets-file", str(secrets_file)])
     uncertain = False
     try:
         result = _run(runner, command, timeout=240)
