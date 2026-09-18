@@ -12,6 +12,7 @@ import cloudflare_provider as cf
 import cloudflare_release as release
 import live_probe
 import production_preflight as preflight
+import runtime_credentials as credentials
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODE = "SHADOW_ACCEPTANCE"
@@ -97,9 +98,12 @@ def _required_env() -> dict[str, str]:
         "CLOUDFLARE_ACCOUNT_ID",
         "FARE_D1_DATABASE_ID",
         "FARE_WORKER_TOKEN",
+        "FARE_INGEST_HMAC_SECRETS",
         "FARE_SHADOW_REVIEWER_KEY_ID",
+        "FARE_SHADOW_REVIEWER_SECRET_SLOT",
         "FARE_SHADOW_REVIEWER_SECRET",
         "FARE_ACCESS_REVIEWER_KEY_ID",
+        "FARE_ACCESS_REVIEWER_SECRET_SLOT",
         "FARE_ACCESS_REVIEWER_SECRET",
     ]
     values = {name: os.environ.get(name, "") for name in names}
@@ -178,6 +182,7 @@ def _initial_bootstrap(
     values: dict[str, str],
     readback: Callable[..., dict[str, Any]],
     probes: Callable[..., dict[str, Any]],
+    secrets_file: pathlib.Path,
 ) -> dict[str, Any]:
     command = [
         "npx",
@@ -192,6 +197,8 @@ def _initial_bootstrap(
         f"FARE_COMMIT_SHA:{head}",
         "--var",
         f"FARE_DEPLOYMENT_MODE:{MODE}",
+        "--secrets-file",
+        str(secrets_file),
     ]
     uncertain = False
     try:
@@ -239,6 +246,7 @@ def _versioned_shadow_update(
     before: WorkerSnapshot,
     readback: Callable[..., dict[str, Any]],
     probes: Callable[..., dict[str, Any]],
+    secrets_file: pathlib.Path,
 ) -> dict[str, Any]:
     if (
         before.deployment_mode != MODE
@@ -255,6 +263,7 @@ def _versioned_shadow_update(
             head=head,
             mode=MODE,
             alias_prefix="shadow",
+            secrets_file=secrets_file,
         )
     except release.CloudflareReleaseError as exc:
         raise ShadowDeployError(f"SHADOW_VERSION_UPLOAD_FAILED:{exc}") from exc
@@ -354,28 +363,52 @@ def deploy_shadow(
 
     api = api_factory(values["CLOUDFLARE_ACCOUNT_ID"], values["CLOUDFLARE_API_TOKEN"])
     before = worker_snapshot(api, worker_name)
-    if not before.exists:
-        return _initial_bootstrap(
-            runner=runner,
-            api=api,
-            worker_name=worker_name,
-            head=head,
-            database_id=configured_d1,
-            values=values,
-            readback=readback,
-            probes=probes,
+    if before.exists and (
+        before.deployment_mode != MODE
+        or not before.version_id
+        or not before.commit_sha
+        or not re.fullmatch(r"[0-9a-f]{40}", before.commit_sha)
+    ):
+        raise ShadowDeployError("SHADOW_EXISTING_PRESTATE_NOT_SAFE")
+
+    try:
+        credential_config = credentials.load_config(values)
+        reviewer_auth = credentials.ensure_reviewer_auth_keys(
+            api,
+            configured_d1,
+            credential_config,
         )
-    return _versioned_shadow_update(
-        runner=runner,
-        api=api,
-        worker_name=worker_name,
-        head=head,
-        database_id=configured_d1,
-        values=values,
-        before=before,
-        readback=readback,
-        probes=probes,
-    )
+    except credentials.RuntimeCredentialError as exc:
+        raise ShadowDeployError(f"SHADOW_RUNTIME_CREDENTIALS_INVALID:{exc}") from exc
+
+    with credentials.secret_file(credential_config) as secrets_path:
+        if not before.exists:
+            result = _initial_bootstrap(
+                runner=runner,
+                api=api,
+                worker_name=worker_name,
+                head=head,
+                database_id=configured_d1,
+                values=values,
+                readback=readback,
+                probes=probes,
+                secrets_file=secrets_path,
+            )
+        else:
+            result = _versioned_shadow_update(
+                runner=runner,
+                api=api,
+                worker_name=worker_name,
+                head=head,
+                database_id=configured_d1,
+                values=values,
+                before=before,
+                readback=readback,
+                probes=probes,
+                secrets_file=secrets_path,
+            )
+    result["reviewer_auth"] = reviewer_auth
+    return result
 
 
 def main() -> int:
